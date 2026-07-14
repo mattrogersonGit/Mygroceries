@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Trolley — grocery price compare</title>
+<meta name="theme-color" content="#12151a" />
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="icons/icon-192.png" />
+<style>
+  :root{
+    --bg: #12151a;
+    --panel: #1a1e26;
+    --panel-2: #20252f;
+    --border: #2a3040;
+    --text: #e7eaf0;
+    --muted: #8b93a3;
+    --accent: #ffb454;      /* price-tag amber */
+    --good: #4fd48a;        /* savings green */
+    --bad: #ff6b6b;
+    --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  header{
+    padding:18px 20px 14px; border-bottom:1px solid var(--border);
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  header h1{ font-size:18px; margin:0; letter-spacing:.2px; }
+  header h1 .tag{ color:var(--accent); font-family:var(--mono); }
+  #who{ font-size:13px; color:var(--muted); }
+  main{ max-width:720px; margin:0 auto; padding:16px; padding-bottom:80px; }
+  .card{
+    background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:16px; margin-bottom:14px;
+  }
+  .card h2{ font-size:14px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin:0 0 12px; }
+  input, select, button{
+    font:inherit; color:var(--text); background:var(--panel-2);
+    border:1px solid var(--border); border-radius:8px; padding:10px 12px;
+  }
+  input, select{ width:100%; }
+  button{
+    cursor:pointer; background:var(--accent); color:#1a1206; border:none;
+    font-weight:600; transition:opacity .15s;
+  }
+  button:hover{ opacity:.88; }
+  button.ghost{ background:transparent; color:var(--text); border:1px solid var(--border); font-weight:500; }
+  button.small{ padding:6px 10px; font-size:13px; }
+  .row{ display:flex; gap:8px; }
+  .row > *{ flex:1; }
+  .stores-grid{ display:grid; grid-template-columns:1fr; gap:10px; }
+  .store-row{ display:flex; align-items:center; gap:10px; }
+  .store-row label{ width:96px; font-weight:600; font-size:13px; }
+  .store-row select{ flex:1; }
+  .store-row .default-toggle{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); white-space:nowrap; }
+  #addItemForm{ display:flex; gap:8px; margin-bottom:14px; }
+  .item{
+    border-bottom:1px solid var(--border); padding:12px 0;
+  }
+  .item:last-child{ border-bottom:none; }
+  .item-top{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .item-label{ font-weight:600; }
+  .item-label input[type=checkbox]{ margin-right:8px; }
+  .item-actions button{ background:transparent; color:var(--muted); border:none; font-size:16px; padding:2px 6px; }
+  .price-table{ display:grid; grid-template-columns:1fr auto auto; gap:4px 12px; margin-top:8px; font-family:var(--mono); font-size:13px; }
+  .price-table .chain{ color:var(--muted); }
+  .price-table .price{ text-align:right; }
+  .price-table .delta.good{ color:var(--good); }
+  .price-table .delta.bad{ color:var(--bad); }
+  .price-table .delta.neutral{ color:var(--muted); }
+  .default-badge{
+    font-size:10px; text-transform:uppercase; letter-spacing:.05em;
+    color:var(--muted); border:1px solid var(--border); border-radius:4px; padding:1px 5px;
+  }
+  .empty{ color:var(--muted); font-size:13px; text-align:center; padding:20px 0; }
+  #savingsBanner{
+    display:none; background:var(--panel-2); border:1px solid var(--good);
+    border-radius:10px; padding:12px 14px; margin-bottom:14px;
+    font-family:var(--mono); font-size:14px; color:var(--good);
+  }
+  .hidden{ display:none !important; }
+  #authScreen{ max-width:340px; margin:60px auto; padding:0 16px; }
+  #authScreen h1{ text-align:center; margin-bottom:20px; }
+  #authScreen .card{ padding:20px; }
+  #authScreen input{ margin-bottom:10px; }
+  #authError{ color:var(--bad); font-size:13px; margin-top:8px; min-height:16px; }
+  .muted{ color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+
+<div id="authScreen">
+  <h1><span class="tag">$</span> Trolley</h1>
+  <div class="card">
+    <input id="authEmail" type="email" placeholder="Email" autocomplete="email" />
+    <input id="authPassword" type="password" placeholder="Password" autocomplete="current-password" />
+    <div class="row">
+      <button id="signInBtn">Sign in</button>
+      <button id="signUpBtn" class="ghost">Sign up</button>
+    </div>
+    <div id="authError"></div>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <h1><span class="tag">$</span> Trolley</h1>
+    <div id="who"></div>
+  </header>
+
+  <main>
+    <section id="setupCard" class="card">
+      <h2>Your stores</h2>
+      <div class="stores-grid" id="storesGrid"></div>
+      <p class="muted" id="setupHint">Pick your local store for each chain, and mark one as your default. Prices are compared against your default.</p>
+      <button id="saveStoresBtn" class="small">Save stores</button>
+    </section>
+
+    <div id="savingsBanner"></div>
+
+    <section class="card">
+      <h2>Shopping list</h2>
+      <form id="addItemForm">
+        <input id="newItemLabel" placeholder="e.g. 2L milk, any brand" />
+        <button type="submit">Add</button>
+      </form>
+      <div id="itemsList"></div>
+      <p class="empty hidden" id="emptyState">Your list is empty. Add something above.</p>
+    </section>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+// ---------------------------------------------------------------------------
+// Config — fill these in with your Supabase project's values
+// ---------------------------------------------------------------------------
+const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';
+const SUPABASE_ANON_KEY = 'YOUR-ANON-KEY';
+const CHAINS = [
+  { key: 'paknsave',   label: "Pak'nSave" },
+  { key: 'newworld',   label: 'New World' },
+  { key: 'woolworths', label: 'Woolworths' },
+];
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let session = null;
+let profile = null;
+let householdStores = []; // [{chain, store_id, store_label, is_default}]
+let listItems = [];
+let latestPrices = {}; // category_key -> [{chain, name, price}]
+
+// ---------------------------------------------------------------------------
+// Auth
+// ---------------------------------------------------------------------------
+document.getElementById('signInBtn').onclick = () => authAction('signInWithPassword');
+document.getElementById('signUpBtn').onclick = () => authAction('signUp');
+
+async function authAction(method) {
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  const errEl = document.getElementById('authError');
+  errEl.textContent = '';
+  if (!email || !password) { errEl.textContent = 'Enter an email and password.'; return; }
+
+  const { data, error } = await sb.auth[method]({ email, password });
+  if (error) { errEl.textContent = error.message; return; }
+  if (method === 'signUp' && !data.session) {
+    errEl.textContent = 'Check your email to confirm your account, then sign in.';
+    return;
+  }
+  await onSignedIn(data.session);
+}
+
+sb.auth.onAuthStateChange((_event, s) => {
+  if (s) onSignedIn(s); else showAuthScreen();
+});
+
+async function onSignedIn(s) {
+  session = s;
+  const { data: p } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
+  profile = p;
+  document.getElementById('authScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('who').textContent = profile?.display_name ?? session.user.email;
+  await loadStores();
+  await loadItems();
+}
+
+function showAuthScreen() {
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('authScreen').classList.remove('hidden');
+}
+
+// ---------------------------------------------------------------------------
+// Store setup
+// ---------------------------------------------------------------------------
+async function loadStores() {
+  const { data } = await sb.from('household_stores').select('*').eq('household_id', profile.household_id);
+  householdStores = data ?? [];
+  renderStoresGrid();
+}
+
+function renderStoresGrid() {
+  const grid = document.getElementById('storesGrid');
+  grid.innerHTML = '';
+  CHAINS.forEach(({ key, label }) => {
+    const existing = householdStores.find((s) => s.chain === key);
+    const row = document.createElement('div');
+    row.className = 'store-row';
+    row.innerHTML = `
+      <label>${label}</label>
+      <select data-chain="${key}" class="store-select">
+        <option value="">Not selected</option>
+      </select>
+      <span class="default-toggle">
+        <input type="radio" name="defaultChain" value="${key}" ${existing?.is_default ? 'checked' : ''} />
+        default
+      </span>
+    `;
+    grid.appendChild(row);
+    populateStoreOptions(key, row.querySelector('.store-select'), existing?.store_id);
+  });
+}
+
+async function populateStoreOptions(chain, selectEl, currentId) {
+  // Calls the get-store-list edge function (proxies each chain's store list API).
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/get-store-list?chain=${chain}`, {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    const { stores } = await res.json();
+    (stores ?? []).forEach((s) => {
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = s.label;
+      if (s.id === currentId) opt.selected = true;
+      selectEl.appendChild(opt);
+    });
+    if (!stores || stores.length === 0) {
+      selectEl.insertAdjacentHTML('beforeend', `<option value="">(store list unavailable — see edge function TODO)</option>`);
+    }
+  } catch {
+    selectEl.insertAdjacentHTML('beforeend', `<option value="">(couldn't load — check edge function)</option>`);
+  }
+}
+
+document.getElementById('saveStoresBtn').onclick = async () => {
+  const selects = document.querySelectorAll('.store-select');
+  const defaultChain = document.querySelector('input[name=defaultChain]:checked')?.value;
+  for (const sel of selects) {
+    const chain = sel.dataset.chain;
+    const storeId = sel.value;
+    if (!storeId) continue;
+    const label = sel.selectedOptions[0].textContent;
+    await sb.from('household_stores').upsert(
+      {
+        household_id: profile.household_id,
+        chain,
+        store_id: storeId,
+        store_label: label,
+        is_default: chain === defaultChain,
+      },
+      { onConflict: 'household_id,chain' },
+    );
+  }
+  await loadStores();
+  await renderItems(); // refresh comparisons now stores changed
+};
+
+// ---------------------------------------------------------------------------
+// Shopping list
+// ---------------------------------------------------------------------------
+document.getElementById('addItemForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const input = document.getElementById('newItemLabel');
+  const label = input.value.trim();
+  if (!label) return;
+  // Simple default: treat the typed label as a free-text category key too.
+  // (Swap in a proper "pick specific product per chain" flow later if wanted.)
+  const category_key = label.toLowerCase().replace(/\s+/g, '-');
+  await sb.from('list_items').insert({
+    household_id: profile.household_id,
+    label,
+    match_type: 'category',
+    category_key,
+    created_by: profile.id,
+  });
+  input.value = '';
+  await loadItems();
+};
+
+async function loadItems() {
+  const { data } = await sb
+    .from('list_items')
+    .select('*')
+    .eq('household_id', profile.household_id)
+    .order('created_at', { ascending: true });
+  listItems = data ?? [];
+  await fetchPricesForItems();
+  renderItems();
+}
+
+async function fetchPricesForItems() {
+  latestPrices = {};
+  const keys = [...new Set(listItems.map((i) => i.category_key).filter(Boolean))];
+  if (keys.length === 0) return;
+  const { data } = await sb
+    .from('products')
+    .select('chain, store_id, name, price, category_key')
+    .in('category_key', keys);
+  (data ?? []).forEach((p) => {
+    // Only keep prices from stores this household actually selected
+    const selected = householdStores.find((s) => s.chain === p.chain && s.store_id === p.store_id);
+    if (!selected) return;
+    latestPrices[p.category_key] ??= [];
+    // Keep cheapest per chain
+    const existing = latestPrices[p.category_key].find((x) => x.chain === p.chain);
+    if (!existing || p.price < existing.price) {
+      latestPrices[p.category_key] = latestPrices[p.category_key].filter((x) => x.chain !== p.chain);
+      latestPrices[p.category_key].push({ chain: p.chain, name: p.name, price: p.price });
+    }
+  });
+}
+
+function renderItems() {
+  const list = document.getElementById('itemsList');
+  const empty = document.getElementById('emptyState');
+  list.innerHTML = '';
+  empty.classList.toggle('hidden', listItems.length > 0);
+
+  const defaultChain = householdStores.find((s) => s.is_default)?.chain;
+  let totalDefault = 0, totalBest = 0, havePrices = false;
+
+  listItems.forEach((item) => {
+    const div = document.createElement('div');
+    div.className = 'item';
+    const prices = latestPrices[item.category_key] ?? [];
+    const defaultPrice = prices.find((p) => p.chain === defaultChain)?.price;
+
+    let tableHtml = '<div class="empty">No price data yet — run the price refresh job.</div>';
+    if (prices.length > 0) {
+      tableHtml = '<div class="price-table">';
+      CHAINS.forEach(({ key, label }) => {
+        const p = prices.find((x) => x.chain === key);
+        if (!p) return;
+        let deltaHtml = '<span class="delta neutral">—</span>';
+        if (defaultPrice != null && key !== defaultChain) {
+          const diff = defaultPrice - p.price;
+          if (Math.abs(diff) > 0.005) {
+            deltaHtml = `<span class="delta ${diff > 0 ? 'good' : 'bad'}">${diff > 0 ? '−' : '+'}$${Math.abs(diff).toFixed(2)}</span>`;
+          }
+        }
+        tableHtml += `
+          <span class="chain">${label}${key === defaultChain ? ' <span class="default-badge">default</span>' : ''}</span>
+          <span class="price">$${p.price.toFixed(2)}</span>
+          ${deltaHtml}
+        `;
+        if (!item.checked) {
+          if (key === defaultChain) totalDefault += p.price;
+          havePrices = true;
+        }
+      });
+      tableHtml += '</div>';
+
+      if (!item.checked && defaultPrice != null) {
+        const cheapest = Math.min(...prices.map((p) => p.price));
+        totalBest += cheapest;
+      } else if (!item.checked) {
+        totalBest += defaultPrice ?? 0;
+      }
+    }
+
+    div.innerHTML = `
+      <div class="item-top">
+        <span class="item-label">
+          <input type="checkbox" ${item.checked ? 'checked' : ''} data-id="${item.id}" class="item-check" />
+          ${item.label}
+        </span>
+        <span class="item-actions"><button data-id="${item.id}" class="item-delete">✕</button></span>
+      </div>
+      ${tableHtml}
+    `;
+    list.appendChild(div);
+  });
+
+  document.querySelectorAll('.item-check').forEach((cb) => {
+    cb.onchange = async (e) => {
+      await sb.from('list_items').update({ checked: e.target.checked }).eq('id', e.target.dataset.id);
+      await loadItems();
+    };
+  });
+  document.querySelectorAll('.item-delete').forEach((btn) => {
+    btn.onclick = async (e) => {
+      await sb.from('list_items').delete().eq('id', e.target.dataset.id);
+      await loadItems();
+    };
+  });
+
+  const banner = document.getElementById('savingsBanner');
+  if (havePrices && totalDefault > totalBest + 0.01) {
+    banner.style.display = 'block';
+    banner.textContent = `Splitting this list across stores saves $${(totalDefault - totalBest).toFixed(2)} vs. buying it all at your default store.`;
+  } else {
+    banner.style.display = 'none';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
+sb.auth.getSession().then(({ data }) => {
+  if (data.session) onSignedIn(data.session); else showAuthScreen();
+});
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+</script>
+</body>
+</html>
