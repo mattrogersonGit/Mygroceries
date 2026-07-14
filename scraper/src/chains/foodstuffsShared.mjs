@@ -25,7 +25,12 @@ const DEBUG_DIR = fileURLToPath(new URL('../../debug/', import.meta.url));
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-const SEARCH_TIMEOUT_MS = 10000;
+// Tuned generously for GitHub Actions' CI runners (US/EU-hosted, so much
+// higher latency + Cloudflare challenge-solving overhead reaching NZ sites
+// than testing from closer to NZ ever showed) - a run that failed here with
+// pure timeouts (no other error) on every single search is the signature of
+// this being too tight, not a real site/selector problem.
+const SEARCH_TIMEOUT_MS = 30000;
 const RESULTS_PER_TERM = 5;
 
 export function createFoodstuffsChain({ chain, baseUrl, apiHost }) {
