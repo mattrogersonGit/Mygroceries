@@ -73,13 +73,21 @@
   button.small{ padding:6px 10px; font-size:13px; }
   .row{ display:flex; gap:8px; }
   .row > *{ flex:1; }
-  .stores-grid{ display:grid; grid-template-columns:1fr; gap:10px; }
-  .store-row{ display:flex; align-items:center; gap:10px; }
-  .store-row label{ width:96px; font-weight:600; font-size:13px; flex:none; }
-  .store-row select{ flex:1; }
-  .store-row .store-pick-value{ flex:1; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .store-row .store-pick-clear{ flex:none; padding:4px 8px; }
-  .store-row .default-toggle{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); white-space:nowrap; flex:none; }
+  .my-stores-heading{ font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:600; margin:16px 0 8px; }
+  .stores-grid{ display:grid; grid-template-columns:1fr; gap:8px; }
+  .store-pick-tile{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    border:1px solid var(--border); border-radius:10px; padding:10px 12px;
+    background:var(--panel-2);
+  }
+  .store-pick-tile.picked{ border-color:var(--accent); }
+  .store-pick-info{ min-width:0; }
+  .store-pick-chain{ font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:600; }
+  .store-pick-name{ font-size:14px; font-weight:600; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .store-pick-name.unselected{ font-weight:400; color:var(--muted); }
+  .store-pick-controls{ display:flex; align-items:center; gap:10px; flex:none; }
+  .store-pick-controls .default-toggle{ display:flex; align-items:center; gap:5px; font-size:12px; color:var(--muted); white-space:nowrap; }
+  .store-pick-clear{ background:transparent; color:var(--muted); border:none; font-size:16px; line-height:1; padding:2px 4px; }
   #findStoresError{ color:var(--bad); font-size:12px; min-height:14px; margin:2px 0 8px; }
   #storeMap{ height:280px; border-radius:8px; border:1px solid var(--border); margin-bottom:10px; background:var(--panel-2); }
   .leaflet-popup-content-wrapper, .leaflet-popup-tip{ background:var(--panel-2); color:var(--text); }
@@ -180,6 +188,7 @@
           <span><i class="dot" style="background:var(--chain-woolworths)"></i>Woolworths</span>
         </div>
         <div id="storeResultsList" class="store-results hidden"></div>
+        <h3 class="my-stores-heading">My Stores</h3>
         <div class="stores-grid" id="storePicksGrid"></div>
         <p class="muted" id="setupHint">Search a postcode above, pick your local store per chain from the map or list, and mark one as your default. Prices are compared against your default.</p>
         <button id="saveStoresBtn" class="small">Save stores</button>
@@ -487,22 +496,26 @@ function renderStorePicks() {
   CHAINS.forEach(({ key, label }) => {
     const picked = pendingSelection[key];
     const hasData = STORES.some((s) => s.chain === key);
-    const row = document.createElement('div');
-    row.className = 'store-row';
-    row.innerHTML = `
-      <label>${label}</label>
-      <span class="store-pick-value">${
-        picked
-          ? `${picked.name}${picked.address ? ` <span class="muted">— ${picked.address}</span>` : ''}`
-          : `<span class="muted">Not selected</span>${!hasData ? ' <span class="no-data-note">(no store data yet)</span>' : ''}`
-      }</span>
-      ${picked ? `<button type="button" class="store-pick-clear small ghost" data-chain="${key}">✕</button>` : ''}
-      <span class="default-toggle">
-        <input type="radio" name="defaultChain" value="${key}" ${pendingDefaultChain === key ? 'checked' : ''} />
-        default
-      </span>
+    const tile = document.createElement('div');
+    tile.className = 'store-pick-tile' + (picked ? ' picked' : '');
+    tile.innerHTML = `
+      <div class="store-pick-info">
+        <div class="store-pick-chain">${label}</div>
+        <div class="store-pick-name${picked ? '' : ' unselected'}">${
+          picked
+            ? picked.name
+            : `Not selected${!hasData ? ' <span class="no-data-note">(no store data yet)</span>' : ''}`
+        }</div>
+      </div>
+      <div class="store-pick-controls">
+        ${picked ? `<button type="button" class="store-pick-clear" data-chain="${key}" aria-label="Clear ${label}">✕</button>` : ''}
+        <label class="default-toggle">
+          <input type="radio" name="defaultChain" value="${key}" ${pendingDefaultChain === key ? 'checked' : ''} />
+          default
+        </label>
+      </div>
     `;
-    grid.appendChild(row);
+    grid.appendChild(tile);
   });
   grid.querySelectorAll('.store-pick-clear').forEach((btn) => {
     btn.onclick = () => { pendingSelection[btn.dataset.chain] = null; renderStorePicks(); };
