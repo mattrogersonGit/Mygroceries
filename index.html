@@ -84,6 +84,9 @@
   .store-result-item.selected{ background:var(--panel-2); border-left:3px solid var(--accent); }
   .store-result-item .addr{ display:block; color:var(--muted); font-size:11px; }
   .no-data-note{ color:var(--muted); font-size:11px; font-style:italic; }
+  .save-status{ margin-left:10px; font-size:12px; }
+  .save-status.ok{ color:var(--good); }
+  .save-status.error{ color:var(--bad); }
   #addItemForm{ display:flex; gap:8px; margin-bottom:14px; }
   .item{
     border-bottom:1px solid var(--border); padding:12px 0;
@@ -163,6 +166,7 @@
       <div class="stores-grid" id="storePicksGrid"></div>
       <p class="muted" id="setupHint">Search a postcode above, pick your local store per chain from the map or list, and mark one as your default. Prices are compared against your default.</p>
       <button id="saveStoresBtn" class="small">Save stores</button>
+      <span id="saveStoresStatus" class="save-status"></span>
     </section>
 
     <div id="savingsBanner"></div>
@@ -382,7 +386,10 @@ function renderStoreMarkers(stores) {
 
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('.popup-select-btn');
-  if (btn && lastResultsById[btn.dataset.id]) selectStore(lastResultsById[btn.dataset.id]);
+  if (btn && lastResultsById[btn.dataset.id]) {
+    selectStore(lastResultsById[btn.dataset.id]);
+    leafletMap.closePopup();
+  }
 });
 
 function renderStoreResultsList(stores) {
@@ -447,22 +454,45 @@ function renderStorePicks() {
 }
 
 document.getElementById('saveStoresBtn').onclick = async () => {
-  for (const { key: chain } of CHAINS) {
-    const store = pendingSelection[chain];
-    if (!store) continue;
-    await sb.from('household_stores').upsert(
-      {
-        household_id: profile.household_id,
-        chain,
-        store_id: store.id,
-        store_label: store.name,
-        is_default: chain === pendingDefaultChain,
-      },
-      { onConflict: 'household_id,chain' },
-    );
+  const btn = document.getElementById('saveStoresBtn');
+  const statusEl = document.getElementById('saveStoresStatus');
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  btn.textContent = 'Saving…';
+  statusEl.textContent = '';
+  statusEl.className = 'muted';
+
+  const errors = [];
+  try {
+    for (const { key: chain } of CHAINS) {
+      const store = pendingSelection[chain];
+      if (!store) continue;
+      const { error } = await sb.from('household_stores').upsert(
+        {
+          household_id: profile.household_id,
+          chain,
+          store_id: store.id,
+          store_label: store.name,
+          is_default: chain === pendingDefaultChain,
+        },
+        { onConflict: 'household_id,chain' },
+      );
+      if (error) errors.push(`${chainLabel(chain)}: ${error.message}`);
+    }
+    await loadStores();
+    await renderItems(); // refresh comparisons now stores changed
+
+    if (errors.length) {
+      statusEl.textContent = `Couldn't save: ${errors.join('; ')}`;
+      statusEl.className = 'save-status error';
+    } else {
+      statusEl.textContent = 'Saved.';
+      statusEl.className = 'save-status ok';
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
   }
-  await loadStores();
-  await renderItems(); // refresh comparisons now stores changed
 };
 
 // ---------------------------------------------------------------------------
