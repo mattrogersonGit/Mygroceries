@@ -143,7 +143,7 @@
     <section id="setupCard" class="card">
       <h2>Your stores</h2>
       <div class="row" id="storeFinderControls">
-        <input id="postcodeInput" placeholder="Postcode, e.g. 1023" inputmode="numeric" />
+        <input id="postcodeInput" placeholder="Postcode or suburb, e.g. 1023 or Royal Oak" />
         <select id="radiusSelect">
           <option value="5">5 km</option>
           <option value="10" selected>10 km</option>
@@ -242,6 +242,7 @@ async function onSignedIn(s) {
   document.getElementById('authScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('who').textContent = profile?.display_name ?? session.user.email;
+  initMap(); // must run while #app is visible - Leaflet needs a real container size
   await loadStores();
   await loadItems();
 }
@@ -303,13 +304,29 @@ function initMap() {
   markersLayer = L.layerGroup().addTo(leafletMap);
 }
 
-async function geocodePostcode(postcode) {
-  const res = await fetch(
-    `https://nominatim.openstreetmap.org/search?postalcode=${encodeURIComponent(postcode)}&country=New%20Zealand&format=json&limit=1`,
+async function geocodePostcode(query) {
+  // Try a structured postcode lookup first (most precise when it's a real
+  // numeric postcode) - but NZ postcode coverage in OSM/Nominatim is patchy,
+  // so fall back to a free-text place search (suburb/town names are far more
+  // reliably indexed). Free-text results are filtered to place_rank <= 21 to
+  // reject low-relevance street/POI matches (e.g. a random bus stop) that
+  // happen to share the query digits.
+  const postcodeRes = await fetch(
+    `https://nominatim.openstreetmap.org/search?postalcode=${encodeURIComponent(query)}&country=New%20Zealand&format=json&limit=1`,
   );
-  const data = await res.json();
-  if (!data || !data.length) return null;
-  return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+  const postcodeData = await postcodeRes.json();
+  if (postcodeData && postcodeData.length) {
+    return { lat: parseFloat(postcodeData[0].lat), lng: parseFloat(postcodeData[0].lon) };
+  }
+
+  const placeRes = await fetch(
+    `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query + ', New Zealand')}&format=json&limit=1&countrycodes=nz`,
+  );
+  const placeData = await placeRes.json();
+  const match = placeData?.find((r) => r.place_rank <= 21);
+  if (match) return { lat: parseFloat(match.lat), lng: parseFloat(match.lon) };
+
+  return null;
 }
 
 document.getElementById('findStoresBtn').onclick = async () => {
@@ -317,7 +334,7 @@ document.getElementById('findStoresBtn').onclick = async () => {
   const errEl = document.getElementById('findStoresError');
   errEl.textContent = '';
   const postcode = document.getElementById('postcodeInput').value.trim();
-  if (!postcode) { errEl.textContent = 'Enter a postcode first.'; return; }
+  if (!postcode) { errEl.textContent = 'Enter a postcode or suburb first.'; return; }
   const radiusKm = parseFloat(document.getElementById('radiusSelect').value);
 
   btn.disabled = true;
@@ -325,7 +342,7 @@ document.getElementById('findStoresBtn').onclick = async () => {
   btn.textContent = 'Searching…';
   try {
     const center = await geocodePostcode(postcode);
-    if (!center) { errEl.textContent = "Couldn't find that postcode - check it and try again."; return; }
+    if (!center) { errEl.textContent = "Couldn't find that - try a nearby suburb or town name instead."; return; }
 
     initMap();
     leafletMap.setView([center.lat, center.lng], radiusToZoom(radiusKm));
