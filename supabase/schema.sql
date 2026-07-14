@@ -89,9 +89,15 @@ alter table list_items enable row level security;
 alter table products enable row level security;
 alter table price_history enable row level security;
 
+-- security definer is required here: this function is called from inside the
+-- RLS policy on `profiles` itself. Without it, evaluating the policy queries
+-- profiles, which re-evaluates the policy, which queries profiles again -
+-- infinite recursion ("stack depth limit exceeded"). security definer runs
+-- this query as the function owner (bypassing RLS), breaking the loop.
 create or replace function my_household_id()
 returns uuid
-language sql stable
+language sql stable security definer
+set search_path = public
 as $$
   select household_id from profiles where id = auth.uid()
 $$;
@@ -126,10 +132,15 @@ create policy "anyone logged in can read price history" on price_history
 -- Helper: create a household + profile automatically on signup
 -- ============================================================
 
+-- set search_path = public is required: this trigger fires from an insert into
+-- auth.users, whose execution context doesn't include the public schema in its
+-- search path by default, so the unqualified table names below would otherwise
+-- fail to resolve ("Database error saving new user").
 create or replace function handle_new_user()
 returns trigger
 language plpgsql
 security definer
+set search_path = public
 as $$
 declare
   new_household_id uuid;
