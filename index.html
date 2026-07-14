@@ -37,7 +37,23 @@
   header h1{ font-size:18px; margin:0; letter-spacing:.2px; }
   header h1 .tag{ color:var(--accent); font-family:var(--mono); }
   #who{ font-size:13px; color:var(--muted); }
-  main{ max-width:720px; margin:0 auto; padding:16px; padding-bottom:80px; }
+  main{ max-width:720px; margin:0 auto; padding:16px; padding-bottom:calc(70px + env(safe-area-inset-bottom, 0px)); }
+  .page{ display:none; }
+  .page.active{ display:block; }
+  #bottom-nav{
+    position:fixed; bottom:0; left:50%; transform:translateX(-50%);
+    width:100%; max-width:720px;
+    background:var(--panel); border-top:1px solid var(--border);
+    display:flex; padding-bottom:env(safe-area-inset-bottom, 0px); z-index:100;
+  }
+  .nav-item{
+    flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
+    padding:10px 4px 8px; cursor:pointer; color:var(--muted); transition:color .15s;
+    font-size:10px; font-weight:500; border:none; background:none;
+  }
+  .nav-item svg{ width:22px; height:22px; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  .nav-item.active{ color:var(--accent); }
+  .item-label.checked-off{ text-decoration:line-through; opacity:.5; }
   .card{
     background:var(--panel); border:1px solid var(--border); border-radius:12px;
     padding:16px; margin-bottom:14px;
@@ -143,44 +159,70 @@
   </header>
 
   <main>
-    <section id="setupCard" class="card">
-      <h2>Your stores</h2>
-      <div class="row" id="storeFinderControls">
-        <input id="postcodeInput" placeholder="Postcode or suburb, e.g. 1023 or Royal Oak" />
-        <select id="radiusSelect">
-          <option value="5">5 km</option>
-          <option value="10" selected>10 km</option>
-          <option value="20">20 km</option>
-          <option value="50">50 km</option>
-        </select>
-        <button id="findStoresBtn" type="button">Find stores</button>
-      </div>
-      <p id="findStoresError"></p>
-      <div id="storeMap"></div>
-      <div class="store-legend">
-        <span><i class="dot" style="background:var(--chain-paknsave)"></i>Pak'nSave</span>
-        <span><i class="dot" style="background:var(--chain-newworld)"></i>New World</span>
-        <span><i class="dot" style="background:var(--chain-woolworths)"></i>Woolworths</span>
-      </div>
-      <div id="storeResultsList" class="store-results hidden"></div>
-      <div class="stores-grid" id="storePicksGrid"></div>
-      <p class="muted" id="setupHint">Search a postcode above, pick your local store per chain from the map or list, and mark one as your default. Prices are compared against your default.</p>
-      <button id="saveStoresBtn" class="small">Save stores</button>
-      <span id="saveStoresStatus" class="save-status"></span>
-    </section>
+    <div class="page" id="page-stores">
+      <section id="setupCard" class="card">
+        <h2>Your stores</h2>
+        <div class="row" id="storeFinderControls">
+          <input id="postcodeInput" placeholder="Postcode or suburb, e.g. 1023 or Royal Oak" />
+          <select id="radiusSelect">
+            <option value="5">5 km</option>
+            <option value="10" selected>10 km</option>
+            <option value="20">20 km</option>
+            <option value="50">50 km</option>
+          </select>
+          <button id="findStoresBtn" type="button">Find stores</button>
+        </div>
+        <p id="findStoresError"></p>
+        <div id="storeMap"></div>
+        <div class="store-legend">
+          <span><i class="dot" style="background:var(--chain-paknsave)"></i>Pak'nSave</span>
+          <span><i class="dot" style="background:var(--chain-newworld)"></i>New World</span>
+          <span><i class="dot" style="background:var(--chain-woolworths)"></i>Woolworths</span>
+        </div>
+        <div id="storeResultsList" class="store-results hidden"></div>
+        <div class="stores-grid" id="storePicksGrid"></div>
+        <p class="muted" id="setupHint">Search a postcode above, pick your local store per chain from the map or list, and mark one as your default. Prices are compared against your default.</p>
+        <button id="saveStoresBtn" class="small">Save stores</button>
+        <span id="saveStoresStatus" class="save-status"></span>
+      </section>
+    </div>
 
-    <div id="savingsBanner"></div>
+    <div class="page active" id="page-list">
+      <section class="card">
+        <h2>Shopping list</h2>
+        <form id="addItemForm">
+          <input id="newItemLabel" placeholder="e.g. 2L milk, any brand" />
+          <button type="submit">Add</button>
+        </form>
+        <div id="itemsList"></div>
+        <p class="empty hidden" id="emptyState">Your list is empty. Add something above.</p>
+      </section>
+    </div>
 
-    <section class="card">
-      <h2>Shopping list</h2>
-      <form id="addItemForm">
-        <input id="newItemLabel" placeholder="e.g. 2L milk, any brand" />
-        <button type="submit">Add</button>
-      </form>
-      <div id="itemsList"></div>
-      <p class="empty hidden" id="emptyState">Your list is empty. Add something above.</p>
-    </section>
+    <div class="page" id="page-prices">
+      <div id="savingsBanner"></div>
+      <section class="card">
+        <h2>Price comparison</h2>
+        <div id="pricesList"></div>
+        <p class="empty hidden" id="pricesEmptyState">Your list is empty — add items on the List tab first.</p>
+      </section>
+    </div>
   </main>
+
+  <nav id="bottom-nav">
+    <button class="nav-item" onclick="navTo('stores',this)" aria-label="Stores">
+      <svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+      Stores
+    </button>
+    <button class="nav-item active" onclick="navTo('list',this)" aria-label="List">
+      <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+      List
+    </button>
+    <button class="nav-item" onclick="navTo('prices',this)" aria-label="Prices">
+      <svg viewBox="0 0 24 24"><path d="M20.59 13.41L13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+      Prices
+    </button>
+  </nav>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -246,7 +288,6 @@ async function onSignedIn(s) {
   document.getElementById('authScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('who').textContent = profile?.display_name ?? session.user.email;
-  initMap(); // must run while #app is visible - Leaflet needs a real container size
   await loadStores();
   await loadItems();
 }
@@ -254,6 +295,24 @@ async function onSignedIn(s) {
 function showAuthScreen() {
   document.getElementById('app').classList.add('hidden');
   document.getElementById('authScreen').classList.remove('hidden');
+}
+
+// ---------------------------------------------------------------------------
+// Page navigation (Stores / List / Prices)
+// ---------------------------------------------------------------------------
+function navTo(page, el) {
+  document.querySelectorAll('.page').forEach((p) => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach((b) => b.classList.remove('active'));
+  document.getElementById('page-' + page).classList.add('active');
+  el.classList.add('active');
+  window.scrollTo(0, 0);
+  // Leaflet needs a real (visible) container to size itself correctly, so the
+  // map can only be (first-)initialized once #page-stores is actually shown -
+  // initMap() is idempotent, and invalidateSize() handles re-visits.
+  if (page === 'stores') {
+    initMap();
+    leafletMap.invalidateSize();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -480,7 +539,7 @@ document.getElementById('saveStoresBtn').onclick = async () => {
       if (error) errors.push(`${chainLabel(chain)}: ${error.message}`);
     }
     await loadStores();
-    await renderItems(); // refresh comparisons now stores changed
+    await loadItems(); // refresh comparisons now stores changed
 
     if (errors.length) {
       statusEl.textContent = `Couldn't save: ${errors.join('; ')}`;
@@ -525,7 +584,8 @@ async function loadItems() {
     .order('created_at', { ascending: true });
   listItems = data ?? [];
   await fetchPricesForItems();
-  renderItems();
+  renderItemsList();
+  renderPrices();
 }
 
 async function fetchPricesForItems() {
@@ -550,9 +610,48 @@ async function fetchPricesForItems() {
   });
 }
 
-function renderItems() {
+// Interactive list management (add/check/delete) - no price data here, that's
+// the Prices tab's job.
+function renderItemsList() {
   const list = document.getElementById('itemsList');
   const empty = document.getElementById('emptyState');
+  list.innerHTML = '';
+  empty.classList.toggle('hidden', listItems.length > 0);
+
+  listItems.forEach((item) => {
+    const div = document.createElement('div');
+    div.className = 'item';
+    div.innerHTML = `
+      <div class="item-top">
+        <span class="item-label">
+          <input type="checkbox" ${item.checked ? 'checked' : ''} data-id="${item.id}" class="item-check" />
+          ${item.label}
+        </span>
+        <span class="item-actions"><button data-id="${item.id}" class="item-delete">✕</button></span>
+      </div>
+    `;
+    list.appendChild(div);
+  });
+
+  document.querySelectorAll('.item-check').forEach((cb) => {
+    cb.onchange = async (e) => {
+      await sb.from('list_items').update({ checked: e.target.checked }).eq('id', e.target.dataset.id);
+      await loadItems();
+    };
+  });
+  document.querySelectorAll('.item-delete').forEach((btn) => {
+    btn.onclick = async (e) => {
+      await sb.from('list_items').delete().eq('id', e.target.dataset.id);
+      await loadItems();
+    };
+  });
+}
+
+// Read-only price comparison + savings banner - the List tab handles adding,
+// checking off, and deleting items.
+function renderPrices() {
+  const list = document.getElementById('pricesList');
+  const empty = document.getElementById('pricesEmptyState');
   list.innerHTML = '';
   empty.classList.toggle('hidden', listItems.length > 0);
 
@@ -600,28 +699,11 @@ function renderItems() {
 
     div.innerHTML = `
       <div class="item-top">
-        <span class="item-label">
-          <input type="checkbox" ${item.checked ? 'checked' : ''} data-id="${item.id}" class="item-check" />
-          ${item.label}
-        </span>
-        <span class="item-actions"><button data-id="${item.id}" class="item-delete">✕</button></span>
+        <span class="item-label${item.checked ? ' checked-off' : ''}">${item.label}</span>
       </div>
       ${tableHtml}
     `;
     list.appendChild(div);
-  });
-
-  document.querySelectorAll('.item-check').forEach((cb) => {
-    cb.onchange = async (e) => {
-      await sb.from('list_items').update({ checked: e.target.checked }).eq('id', e.target.dataset.id);
-      await loadItems();
-    };
-  });
-  document.querySelectorAll('.item-delete').forEach((btn) => {
-    btn.onclick = async (e) => {
-      await sb.from('list_items').delete().eq('id', e.target.dataset.id);
-      await loadItems();
-    };
   });
 
   const banner = document.getElementById('savingsBanner');
