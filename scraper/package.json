@@ -2,7 +2,7 @@
   "name": "trolley-scraper",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": { "node": ">=22" },
   "scripts": {
     "scrape": "node src/index.mjs"
   },
