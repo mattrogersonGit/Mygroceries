@@ -7,6 +7,7 @@
 <meta name="theme-color" content="#12151a" />
 <link rel="manifest" href="manifest.json" />
 <link rel="icon" href="icons/icon-192.png" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
   :root{
     --bg: #12151a;
@@ -18,6 +19,9 @@
     --accent: #ffb454;      /* price-tag amber */
     --good: #4fd48a;        /* savings green */
     --bad: #ff6b6b;
+    --chain-paknsave: #ffb454;
+    --chain-newworld: #e2483d;
+    --chain-woolworths: #2e8b57;
     --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
   }
   *{ box-sizing:border-box; }
@@ -55,9 +59,31 @@
   .row > *{ flex:1; }
   .stores-grid{ display:grid; grid-template-columns:1fr; gap:10px; }
   .store-row{ display:flex; align-items:center; gap:10px; }
-  .store-row label{ width:96px; font-weight:600; font-size:13px; }
+  .store-row label{ width:96px; font-weight:600; font-size:13px; flex:none; }
   .store-row select{ flex:1; }
-  .store-row .default-toggle{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); white-space:nowrap; }
+  .store-row .store-pick-value{ flex:1; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .store-row .store-pick-clear{ flex:none; padding:4px 8px; }
+  .store-row .default-toggle{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); white-space:nowrap; flex:none; }
+  #findStoresError{ color:var(--bad); font-size:12px; min-height:14px; margin:2px 0 8px; }
+  #storeMap{ height:280px; border-radius:8px; border:1px solid var(--border); margin-bottom:10px; background:var(--panel-2); }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip{ background:var(--panel-2); color:var(--text); }
+  .leaflet-popup-content button{ margin-top:6px; }
+  .leaflet-container{ background:var(--panel-2); }
+  .leaflet-control-attribution{ background:rgba(18,21,26,.7) !important; color:var(--muted) !important; }
+  .leaflet-control-attribution a{ color:var(--muted) !important; }
+  .store-marker{ display:block; width:14px; height:14px; border-radius:50%; border:2px solid var(--bg); box-shadow:0 0 0 1px rgba(0,0,0,.4); }
+  .store-marker-paknsave{ background:var(--chain-paknsave); }
+  .store-marker-newworld{ background:var(--chain-newworld); }
+  .store-marker-woolworths{ background:var(--chain-woolworths); }
+  .store-legend{ display:flex; gap:14px; font-size:12px; color:var(--muted); margin:8px 0 4px; }
+  .store-legend .dot{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; vertical-align:middle; }
+  .store-results{ max-height:220px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; margin:10px 0; }
+  .store-results-group h3{ font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); padding:8px 12px 4px; margin:0; }
+  .store-result-item{ padding:8px 12px; font-size:13px; cursor:pointer; border-top:1px solid var(--border); }
+  .store-result-item:hover{ background:var(--panel-2); }
+  .store-result-item.selected{ background:var(--panel-2); border-left:3px solid var(--accent); }
+  .store-result-item .addr{ display:block; color:var(--muted); font-size:11px; }
+  .no-data-note{ color:var(--muted); font-size:11px; font-style:italic; }
   #addItemForm{ display:flex; gap:8px; margin-bottom:14px; }
   .item{
     border-bottom:1px solid var(--border); padding:12px 0;
@@ -116,8 +142,26 @@
   <main>
     <section id="setupCard" class="card">
       <h2>Your stores</h2>
-      <div class="stores-grid" id="storesGrid"></div>
-      <p class="muted" id="setupHint">Pick your local store for each chain, and mark one as your default. Prices are compared against your default.</p>
+      <div class="row" id="storeFinderControls">
+        <input id="postcodeInput" placeholder="Postcode, e.g. 1023" inputmode="numeric" />
+        <select id="radiusSelect">
+          <option value="5">5 km</option>
+          <option value="10" selected>10 km</option>
+          <option value="20">20 km</option>
+          <option value="50">50 km</option>
+        </select>
+        <button id="findStoresBtn" type="button">Find stores</button>
+      </div>
+      <p id="findStoresError"></p>
+      <div id="storeMap"></div>
+      <div class="store-legend">
+        <span><i class="dot" style="background:var(--chain-paknsave)"></i>Pak'nSave</span>
+        <span><i class="dot" style="background:var(--chain-newworld)"></i>New World</span>
+        <span><i class="dot" style="background:var(--chain-woolworths)"></i>Woolworths</span>
+      </div>
+      <div id="storeResultsList" class="store-results hidden"></div>
+      <div class="stores-grid" id="storePicksGrid"></div>
+      <p class="muted" id="setupHint">Search a postcode above, pick your local store per chain from the map or list, and mark one as your default. Prices are compared against your default.</p>
       <button id="saveStoresBtn" class="small">Save stores</button>
     </section>
 
@@ -136,6 +180,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="stores-data.js"></script>
 <script>
 // ---------------------------------------------------------------------------
 // Config — fill these in with your Supabase project's values
@@ -155,6 +201,13 @@ let profile = null;
 let householdStores = []; // [{chain, store_id, store_label, is_default}]
 let listItems = [];
 let latestPrices = {}; // category_key -> [{chain, name, price}]
+
+// Store picker state
+let pendingSelection = {}; // chain -> {chain, id, name, address, lat, lng} | null
+let pendingDefaultChain = null;
+let leafletMap = null;
+let markersLayer = null;
+let lastResultsById = {}; // id -> store, for the currently rendered search results
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -204,68 +257,189 @@ function showAuthScreen() {
 async function loadStores() {
   const { data } = await sb.from('household_stores').select('*').eq('household_id', profile.household_id);
   householdStores = data ?? [];
-  renderStoresGrid();
+
+  // Seed the in-progress picker state from what's already saved. If a saved
+  // store_id isn't in the current STORES dataset (e.g. it was regenerated),
+  // fall back to a stub built from the saved label so we don't lose the
+  // selection - it just can't be re-centered on the map until re-picked.
+  pendingSelection = {};
+  householdStores.forEach((s) => {
+    const match = STORES.find((st) => st.id === s.store_id && st.chain === s.chain);
+    pendingSelection[s.chain] = match ?? { chain: s.chain, id: s.store_id, name: s.store_label, address: '', lat: null, lng: null };
+  });
+  pendingDefaultChain = householdStores.find((s) => s.is_default)?.chain ?? null;
+
+  renderStorePicks();
 }
 
-function renderStoresGrid() {
-  const grid = document.getElementById('storesGrid');
+function chainLabel(key) {
+  return CHAINS.find((c) => c.key === key)?.label ?? key;
+}
+
+function haversineDistanceKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function radiusToZoom(km) {
+  if (km <= 5) return 12;
+  if (km <= 10) return 11;
+  if (km <= 20) return 10;
+  return 9;
+}
+
+function initMap() {
+  if (leafletMap) return;
+  leafletMap = L.map('storeMap').setView([-41.2, 174.8], 5);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors',
+    maxZoom: 18,
+  }).addTo(leafletMap);
+  markersLayer = L.layerGroup().addTo(leafletMap);
+}
+
+async function geocodePostcode(postcode) {
+  const res = await fetch(
+    `https://nominatim.openstreetmap.org/search?postalcode=${encodeURIComponent(postcode)}&country=New%20Zealand&format=json&limit=1`,
+  );
+  const data = await res.json();
+  if (!data || !data.length) return null;
+  return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+}
+
+document.getElementById('findStoresBtn').onclick = async () => {
+  const btn = document.getElementById('findStoresBtn');
+  const errEl = document.getElementById('findStoresError');
+  errEl.textContent = '';
+  const postcode = document.getElementById('postcodeInput').value.trim();
+  if (!postcode) { errEl.textContent = 'Enter a postcode first.'; return; }
+  const radiusKm = parseFloat(document.getElementById('radiusSelect').value);
+
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  btn.textContent = 'Searching…';
+  try {
+    const center = await geocodePostcode(postcode);
+    if (!center) { errEl.textContent = "Couldn't find that postcode - check it and try again."; return; }
+
+    initMap();
+    leafletMap.setView([center.lat, center.lng], radiusToZoom(radiusKm));
+
+    const inRange = STORES
+      .filter((s) => s.lat != null && s.lng != null)
+      .map((s) => ({ ...s, distanceKm: haversineDistanceKm(center.lat, center.lng, s.lat, s.lng) }))
+      .filter((s) => s.distanceKm <= radiusKm)
+      .sort((a, b) => a.distanceKm - b.distanceKm);
+
+    if (inRange.length === 0) {
+      errEl.textContent = 'No stores found in range - try a larger radius.';
+    }
+    renderStoreMarkers(inRange);
+    renderStoreResultsList(inRange);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+};
+
+function makeDivIcon(chain) {
+  return L.divIcon({ className: '', html: `<span class="store-marker store-marker-${chain}"></span>`, iconSize: [14, 14] });
+}
+
+function renderStoreMarkers(stores) {
+  markersLayer.clearLayers();
+  lastResultsById = {};
+  stores.forEach((s) => {
+    lastResultsById[s.id] = s;
+    const marker = L.marker([s.lat, s.lng], { icon: makeDivIcon(s.chain) }).addTo(markersLayer);
+    marker.bindPopup(
+      `<strong>${s.name}</strong><br>${s.address}<br><button type="button" class="small popup-select-btn" data-id="${s.id}">Select as my ${chainLabel(s.chain)} store</button>`,
+    );
+  });
+}
+
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.popup-select-btn');
+  if (btn && lastResultsById[btn.dataset.id]) selectStore(lastResultsById[btn.dataset.id]);
+});
+
+function renderStoreResultsList(stores) {
+  const listEl = document.getElementById('storeResultsList');
+  listEl.classList.toggle('hidden', stores.length === 0);
+  listEl.innerHTML = '';
+  CHAINS.forEach(({ key, label }) => {
+    const chainStores = stores.filter((s) => s.chain === key);
+    if (chainStores.length === 0) return;
+    const group = document.createElement('div');
+    group.className = 'store-results-group';
+    group.innerHTML = `<h3>${label}</h3>`;
+    chainStores.forEach((s) => {
+      const item = document.createElement('div');
+      item.className = 'store-result-item' + (pendingSelection[key]?.id === s.id ? ' selected' : '');
+      item.innerHTML = `${s.name} <span class="muted">(${s.distanceKm.toFixed(1)} km)</span><span class="addr">${s.address}</span>`;
+      item.onclick = () => selectStore(s);
+      group.appendChild(item);
+    });
+    listEl.appendChild(group);
+  });
+}
+
+function selectStore(store) {
+  pendingSelection[store.chain] = store;
+  renderStorePicks();
+  const resultsById = lastResultsById;
+  if (Object.keys(resultsById).length) {
+    renderStoreResultsList(Object.values(resultsById).sort((a, b) => a.distanceKm - b.distanceKm));
+  }
+}
+
+function renderStorePicks() {
+  const grid = document.getElementById('storePicksGrid');
   grid.innerHTML = '';
   CHAINS.forEach(({ key, label }) => {
-    const existing = householdStores.find((s) => s.chain === key);
+    const picked = pendingSelection[key];
+    const hasData = STORES.some((s) => s.chain === key);
     const row = document.createElement('div');
     row.className = 'store-row';
     row.innerHTML = `
       <label>${label}</label>
-      <select data-chain="${key}" class="store-select">
-        <option value="">Not selected</option>
-      </select>
+      <span class="store-pick-value">${
+        picked
+          ? `${picked.name}${picked.address ? ` <span class="muted">— ${picked.address}</span>` : ''}`
+          : `<span class="muted">Not selected</span>${!hasData ? ' <span class="no-data-note">(no store data yet)</span>' : ''}`
+      }</span>
+      ${picked ? `<button type="button" class="store-pick-clear small ghost" data-chain="${key}">✕</button>` : ''}
       <span class="default-toggle">
-        <input type="radio" name="defaultChain" value="${key}" ${existing?.is_default ? 'checked' : ''} />
+        <input type="radio" name="defaultChain" value="${key}" ${pendingDefaultChain === key ? 'checked' : ''} />
         default
       </span>
     `;
     grid.appendChild(row);
-    populateStoreOptions(key, row.querySelector('.store-select'), existing?.store_id);
+  });
+  grid.querySelectorAll('.store-pick-clear').forEach((btn) => {
+    btn.onclick = () => { pendingSelection[btn.dataset.chain] = null; renderStorePicks(); };
+  });
+  grid.querySelectorAll('input[name=defaultChain]').forEach((r) => {
+    r.onchange = (e) => { pendingDefaultChain = e.target.value; };
   });
 }
 
-async function populateStoreOptions(chain, selectEl, currentId) {
-  // Calls the get-store-list edge function (proxies each chain's store list API).
-  try {
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/get-store-list?chain=${chain}`, {
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    });
-    const { stores } = await res.json();
-    (stores ?? []).forEach((s) => {
-      const opt = document.createElement('option');
-      opt.value = s.id;
-      opt.textContent = s.label;
-      if (s.id === currentId) opt.selected = true;
-      selectEl.appendChild(opt);
-    });
-    if (!stores || stores.length === 0) {
-      selectEl.insertAdjacentHTML('beforeend', `<option value="">(store list unavailable — see edge function TODO)</option>`);
-    }
-  } catch {
-    selectEl.insertAdjacentHTML('beforeend', `<option value="">(couldn't load — check edge function)</option>`);
-  }
-}
-
 document.getElementById('saveStoresBtn').onclick = async () => {
-  const selects = document.querySelectorAll('.store-select');
-  const defaultChain = document.querySelector('input[name=defaultChain]:checked')?.value;
-  for (const sel of selects) {
-    const chain = sel.dataset.chain;
-    const storeId = sel.value;
-    if (!storeId) continue;
-    const label = sel.selectedOptions[0].textContent;
+  for (const { key: chain } of CHAINS) {
+    const store = pendingSelection[chain];
+    if (!store) continue;
     await sb.from('household_stores').upsert(
       {
         household_id: profile.household_id,
         chain,
-        store_id: storeId,
-        store_label: label,
-        is_default: chain === defaultChain,
+        store_id: store.id,
+        store_label: store.name,
+        is_default: chain === pendingDefaultChain,
       },
       { onConflict: 'household_id,chain' },
     );

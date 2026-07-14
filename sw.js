@@ -1,5 +1,5 @@
-const CACHE = 'trolley-v2';
-const ASSETS = ['./', './index.html', './manifest.json'];
+const CACHE = 'trolley-v3';
+const ASSETS = ['./', './index.html', './manifest.json', './stores-data.js'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));
@@ -14,8 +14,14 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  // Never intercept Supabase calls - always want fresh data straight from the network.
-  if (e.request.url.includes('supabase.co')) return;
+  // Never intercept Supabase calls, map tiles, or geocoding calls - always want
+  // fresh data/results straight from the network (and don't want unbounded tile
+  // cache growth - let the browser's native HTTP cache handle those).
+  if (
+    e.request.url.includes('supabase.co') ||
+    e.request.url.includes('tile.openstreetmap.org') ||
+    e.request.url.includes('nominatim.openstreetmap.org')
+  ) return;
 
   // Network-first for the app shell itself, so code changes show up on next reload
   // instead of being masked by a stale cache. Falls back to cache when offline.
