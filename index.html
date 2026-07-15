@@ -131,16 +131,17 @@
   .no-rules-note{ color:var(--muted); font-size:12px; font-style:italic; padding:4px 0; }
   #createListForm{ display:flex; flex-direction:column; gap:8px; }
   .list-tile{
-    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;
     border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:8px;
     background:var(--panel-2);
   }
   .list-tile:last-child{ margin-bottom:0; }
   .list-tile.current{ border-color:var(--accent); }
-  .list-tile-info{ min-width:0; }
+  .list-tile-info{ min-width:0; flex:1 1 140px; }
   .list-tile-name{ font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .list-tile-meta{ font-size:12px; color:var(--muted); margin-top:2px; }
-  .list-tile-actions{ display:flex; gap:6px; flex:none; }
+  .list-tile-actions{ display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+  .list-rename-input{ font-size:14px; padding:6px 8px; }
   .analytics-row{ display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--border); font-size:13px; }
   .analytics-row:last-child{ border-bottom:none; }
   .analytics-row .item-icon{ flex:none; font-size:18px; width:22px; text-align:center; }
@@ -421,6 +422,7 @@ let customCategoryRules = []; // [{id, keyword, category, icon}] - household ove
 let allLists = []; // shopping_lists rows for this household
 let currentListId = localStorage.getItem('trolley_current_list_id') || null; // per-browser, not synced across household members
 const LIST_STORAGE_KEY = 'trolley_current_list_id';
+let editingListId = null; // list currently showing its inline rename input, if any
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -792,6 +794,21 @@ function renderMyLists() {
   document.querySelectorAll('.list-complete-btn').forEach((btn) => {
     btn.onclick = () => markListComplete(btn.dataset.id);
   });
+  document.querySelectorAll('.list-rename-btn').forEach((btn) => {
+    btn.onclick = () => { editingListId = btn.dataset.id; renderMyLists(); };
+  });
+  document.querySelectorAll('.list-rename-save').forEach((btn) => {
+    btn.onclick = () => renameList(btn.dataset.id);
+  });
+  document.querySelectorAll('.list-rename-cancel').forEach((btn) => {
+    btn.onclick = () => { editingListId = null; renderMyLists(); };
+  });
+  document.querySelectorAll('.list-rename-input').forEach((input) => {
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') renameList(input.dataset.id);
+      if (e.key === 'Escape') { editingListId = null; renderMyLists(); }
+    };
+  });
 
   const importSelect = document.getElementById('importFromSelect');
   const previousValue = importSelect.value;
@@ -804,6 +821,21 @@ function renderMyLists() {
 function listTileHtml(list, isActive) {
   const isCurrent = list.id === currentListId;
   const meta = `${formatListDate(list.list_date) ?? formatListDate(list.created_at)} · ${list.itemCount ?? 0} item${list.itemCount === 1 ? '' : 's'}`;
+
+  if (list.id === editingListId) {
+    return `
+      <div class="list-tile${isCurrent ? ' current' : ''}">
+        <div class="list-tile-info">
+          <input class="list-rename-input" data-id="${list.id}" value="${list.name}" />
+        </div>
+        <div class="list-tile-actions">
+          <button type="button" class="small list-rename-save" data-id="${list.id}">Save</button>
+          <button type="button" class="ghost small list-rename-cancel" data-id="${list.id}">Cancel</button>
+        </div>
+      </div>
+    `;
+  }
+
   return `
     <div class="list-tile${isCurrent ? ' current' : ''}">
       <div class="list-tile-info">
@@ -812,10 +844,20 @@ function listTileHtml(list, isActive) {
       </div>
       <div class="list-tile-actions">
         ${isActive ? `<button type="button" class="small${isCurrent ? '' : ' ghost'} list-select-btn" data-id="${list.id}">${isCurrent ? 'Selected' : 'Select'}</button>` : ''}
+        <button type="button" class="ghost small list-rename-btn" data-id="${list.id}">Rename</button>
         ${isActive ? `<button type="button" class="ghost small list-complete-btn" data-id="${list.id}">Mark complete</button>` : ''}
       </div>
     </div>
   `;
+}
+
+async function renameList(id) {
+  const input = document.querySelector(`.list-rename-input[data-id="${id}"]`);
+  const newName = input.value.trim();
+  if (!newName) return;
+  await sb.from('shopping_lists').update({ name: newName }).eq('id', id);
+  editingListId = null;
+  await loadLists();
 }
 
 async function selectList(id) {
