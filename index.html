@@ -129,6 +129,25 @@
   .rule-form input, .rule-form select{ flex:1; min-width:110px; }
   .rule-icon-input{ flex:0 0 60px !important; text-align:center; }
   .no-rules-note{ color:var(--muted); font-size:12px; font-style:italic; padding:4px 0; }
+  #createListForm{ display:flex; flex-direction:column; gap:8px; }
+  .list-tile{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:8px;
+    background:var(--panel-2);
+  }
+  .list-tile:last-child{ margin-bottom:0; }
+  .list-tile.current{ border-color:var(--accent); }
+  .list-tile-info{ min-width:0; }
+  .list-tile-name{ font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .list-tile-meta{ font-size:12px; color:var(--muted); margin-top:2px; }
+  .list-tile-actions{ display:flex; gap:6px; flex:none; }
+  .analytics-row{ display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--border); font-size:13px; }
+  .analytics-row:last-child{ border-bottom:none; }
+  .analytics-row .item-icon{ flex:none; font-size:18px; width:22px; text-align:center; }
+  .analytics-row-info{ flex:1; min-width:0; }
+  .analytics-row-label{ font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .analytics-row-dates{ font-size:11px; color:var(--muted); margin-top:1px; }
+  .analytics-row-count{ flex:none; font-family:var(--mono); font-size:13px; color:var(--accent); font-weight:600; text-align:right; }
   #addItemForm{ display:flex; gap:8px; margin-bottom:14px; }
   .item-group-heading{
     font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:600;
@@ -223,6 +242,13 @@
     <div class="page active" id="page-list">
       <section class="card">
         <h2>Shopping list</h2>
+        <div class="settings-row" id="currentListRow">
+          <span class="settings-label">List</span>
+          <span class="settings-value" id="currentListName">—</span>
+        </div>
+        <div id="noListPrompt" class="hidden">
+          <p class="muted">You don't have a list selected yet. Go to <strong>My Lists</strong> to create or pick one.</p>
+        </div>
         <form id="addItemForm">
           <input id="newItemLabel" placeholder="e.g. 2L milk, any brand" />
           <button type="submit">Add</button>
@@ -238,6 +264,44 @@
         <h2>Price comparison</h2>
         <div id="pricesList"></div>
         <p class="empty hidden" id="pricesEmptyState">Your list is empty — add items on the List tab first.</p>
+      </section>
+    </div>
+
+    <div class="page" id="page-lists">
+      <section class="card">
+        <h2>Create a list</h2>
+        <form id="createListForm">
+          <input id="newListName" placeholder="List name, e.g. Essentials or July 15 shop" />
+          <div class="row">
+            <input id="newListDate" type="date" />
+            <select id="importFromSelect">
+              <option value="">Don't import items</option>
+            </select>
+          </div>
+          <button type="submit" class="small">Create list</button>
+        </form>
+        <span id="createListStatus" class="save-status"></span>
+      </section>
+
+      <section class="card">
+        <h2>Active</h2>
+        <div id="activeListsGrid"></div>
+        <p class="empty hidden" id="noActiveListsNote">No active lists — create one above.</p>
+      </section>
+
+      <section class="card">
+        <h2>Completed</h2>
+        <div id="completedListsGrid"></div>
+        <p class="empty hidden" id="noCompletedListsNote">Nothing marked complete yet.</p>
+      </section>
+    </div>
+
+    <div class="page" id="page-analytics">
+      <section class="card">
+        <h2>Purchase frequency</h2>
+        <p class="muted">Based on items in lists you've marked complete — how often each item actually gets bought.</p>
+        <div id="analyticsList"></div>
+        <p class="empty hidden" id="analyticsEmptyState">Mark a list complete to start seeing analytics here.</p>
       </section>
     </div>
 
@@ -307,6 +371,14 @@
       <svg viewBox="0 0 24 24"><path d="M20.59 13.41L13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
       Prices
     </button>
+    <button class="nav-item" onclick="navTo('lists',this)" aria-label="My Lists">
+      <svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      My Lists
+    </button>
+    <button class="nav-item" onclick="navTo('analytics',this)" aria-label="Analytics">
+      <svg viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+      Analytics
+    </button>
     <button class="nav-item" onclick="navTo('settings',this)" aria-label="Settings">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       Settings
@@ -345,6 +417,11 @@ let markersLayer = null;
 let lastResultsById = {}; // id -> store, for the currently rendered search results
 let customCategoryRules = []; // [{id, keyword, category, icon}] - household overrides, checked before ITEM_GROUP_RULES
 
+// Shopping lists state
+let allLists = []; // shopping_lists rows for this household
+let currentListId = localStorage.getItem('trolley_current_list_id') || null; // per-browser, not synced across household members
+const LIST_STORAGE_KEY = 'trolley_current_list_id';
+
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
@@ -380,8 +457,10 @@ async function onSignedIn(s) {
   document.getElementById('who').textContent = profile?.display_name ?? session.user.email;
   await loadStores();
   await loadCategoryRules(); // before loadItems() so the first render already has custom rules applied
+  await loadLists(); // resolves currentListId before loadItems() needs it
   await loadItems();
   await loadSettings();
+  await loadAnalytics();
 }
 
 function showAuthScreen() {
@@ -651,10 +730,164 @@ document.getElementById('saveStoresBtn').onclick = async () => {
 };
 
 // ---------------------------------------------------------------------------
-// Shopping list
+// Shopping lists (the lists themselves - creation, switching, completion)
+// ---------------------------------------------------------------------------
+async function loadLists() {
+  const { data } = await sb
+    .from('shopping_lists')
+    .select('*')
+    .eq('household_id', profile.household_id)
+    .order('created_at', { ascending: false });
+  allLists = data ?? [];
+
+  // One query for every list's item count rather than one query per tile.
+  const { data: itemRows } = await sb
+    .from('list_items')
+    .select('list_id')
+    .eq('household_id', profile.household_id);
+  const counts = {};
+  (itemRows ?? []).forEach((r) => { counts[r.list_id] = (counts[r.list_id] ?? 0) + 1; });
+  allLists.forEach((l) => { l.itemCount = counts[l.id] ?? 0; });
+
+  // Resolve which list is "current": keep it if it's still a valid active
+  // list, otherwise fall back to the most recently created active one, or
+  // null if the household has no active lists at all yet.
+  const stillValid = allLists.find((l) => l.id === currentListId && l.status === 'active');
+  if (!stillValid) {
+    const fallback = allLists.find((l) => l.status === 'active');
+    currentListId = fallback ? fallback.id : null;
+  }
+  if (currentListId) localStorage.setItem(LIST_STORAGE_KEY, currentListId);
+  else localStorage.removeItem(LIST_STORAGE_KEY);
+
+  renderMyLists();
+  renderCurrentListHeader();
+}
+
+function formatListDate(dateOrTimestamp) {
+  if (!dateOrTimestamp) return null;
+  return new Date(dateOrTimestamp).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function renderCurrentListHeader() {
+  const current = allLists.find((l) => l.id === currentListId);
+  document.getElementById('currentListName').textContent = current ? current.name : 'None selected';
+  document.getElementById('noListPrompt').classList.toggle('hidden', !!current);
+  document.getElementById('addItemForm').classList.toggle('hidden', !current);
+}
+
+function renderMyLists() {
+  const active = allLists.filter((l) => l.status === 'active');
+  const completed = allLists.filter((l) => l.status === 'completed');
+
+  document.getElementById('noActiveListsNote').classList.toggle('hidden', active.length > 0);
+  document.getElementById('activeListsGrid').innerHTML = active.map((l) => listTileHtml(l, true)).join('');
+
+  document.getElementById('noCompletedListsNote').classList.toggle('hidden', completed.length > 0);
+  document.getElementById('completedListsGrid').innerHTML = completed.map((l) => listTileHtml(l, false)).join('');
+
+  document.querySelectorAll('.list-select-btn').forEach((btn) => {
+    btn.onclick = () => selectList(btn.dataset.id);
+  });
+  document.querySelectorAll('.list-complete-btn').forEach((btn) => {
+    btn.onclick = () => markListComplete(btn.dataset.id);
+  });
+
+  const importSelect = document.getElementById('importFromSelect');
+  const previousValue = importSelect.value;
+  importSelect.innerHTML =
+    '<option value="">Don\'t import items</option>' +
+    allLists.map((l) => `<option value="${l.id}">${l.name}</option>`).join('');
+  importSelect.value = previousValue;
+}
+
+function listTileHtml(list, isActive) {
+  const isCurrent = list.id === currentListId;
+  const meta = `${formatListDate(list.list_date) ?? formatListDate(list.created_at)} · ${list.itemCount ?? 0} item${list.itemCount === 1 ? '' : 's'}`;
+  return `
+    <div class="list-tile${isCurrent ? ' current' : ''}">
+      <div class="list-tile-info">
+        <div class="list-tile-name">${list.name}</div>
+        <div class="list-tile-meta">${meta}</div>
+      </div>
+      <div class="list-tile-actions">
+        ${isActive ? `<button type="button" class="small${isCurrent ? '' : ' ghost'} list-select-btn" data-id="${list.id}">${isCurrent ? 'Selected' : 'Select'}</button>` : ''}
+        ${isActive ? `<button type="button" class="ghost small list-complete-btn" data-id="${list.id}">Mark complete</button>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+async function selectList(id) {
+  currentListId = id;
+  localStorage.setItem(LIST_STORAGE_KEY, id);
+  renderMyLists();
+  renderCurrentListHeader();
+  await loadItems();
+}
+
+async function markListComplete(id) {
+  await sb.from('shopping_lists').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', id);
+  await loadLists();
+  await loadItems();
+  await loadAnalytics();
+}
+
+document.getElementById('createListForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const status = document.getElementById('createListStatus');
+  const name = document.getElementById('newListName').value.trim();
+  const listDate = document.getElementById('newListDate').value || null;
+  const importFromId = document.getElementById('importFromSelect').value || null;
+  if (!name) { status.textContent = 'Give the list a name first.'; status.className = 'save-status error'; return; }
+
+  status.textContent = '';
+  const { data: newList, error } = await sb
+    .from('shopping_lists')
+    .insert({ household_id: profile.household_id, name, list_date: listDate, created_by: profile.id })
+    .select('id')
+    .single();
+  if (error) {
+    status.textContent = error.message;
+    status.className = 'save-status error';
+    return;
+  }
+
+  if (importFromId) {
+    const { data: sourceItems } = await sb.from('list_items').select('*').eq('list_id', importFromId);
+    if (sourceItems && sourceItems.length > 0) {
+      await sb.from('list_items').insert(
+        sourceItems.map((item) => ({
+          household_id: profile.household_id,
+          list_id: newList.id,
+          label: item.label,
+          match_type: item.match_type,
+          category_key: item.category_key,
+          linked_products: item.linked_products,
+          created_by: profile.id,
+        })),
+      );
+    }
+  }
+
+  document.getElementById('newListName').value = '';
+  document.getElementById('newListDate').value = '';
+  document.getElementById('importFromSelect').value = '';
+  status.textContent = 'List created.';
+  status.className = 'save-status ok';
+
+  currentListId = newList.id;
+  localStorage.setItem(LIST_STORAGE_KEY, newList.id);
+  await loadLists();
+  await loadItems();
+};
+
+// ---------------------------------------------------------------------------
+// Shopping list items (within whichever list is currently selected)
 // ---------------------------------------------------------------------------
 document.getElementById('addItemForm').onsubmit = async (e) => {
   e.preventDefault();
+  if (!currentListId) return; // form is hidden in this state, but guard anyway
   const input = document.getElementById('newItemLabel');
   const label = input.value.trim();
   if (!label) return;
@@ -663,6 +896,7 @@ document.getElementById('addItemForm').onsubmit = async (e) => {
   const category_key = label.toLowerCase().replace(/\s+/g, '-');
   await sb.from('list_items').insert({
     household_id: profile.household_id,
+    list_id: currentListId,
     label,
     match_type: 'category',
     category_key,
@@ -673,15 +907,27 @@ document.getElementById('addItemForm').onsubmit = async (e) => {
 };
 
 async function loadItems() {
+  if (!currentListId) {
+    listItems = [];
+    latestPrices = {};
+    renderItemsList();
+    renderPrices();
+    return;
+  }
   const { data } = await sb
     .from('list_items')
     .select('*')
-    .eq('household_id', profile.household_id)
+    .eq('list_id', currentListId)
     .order('created_at', { ascending: true });
   listItems = data ?? [];
   await fetchPricesForItems();
   renderItemsList();
   renderPrices();
+
+  // Keep each list tile's item count roughly current without a separate
+  // per-tile fetch - cheap enough at this data scale.
+  const list = allLists.find((l) => l.id === currentListId);
+  if (list) { list.itemCount = listItems.length; renderMyLists(); }
 }
 
 async function fetchPricesForItems() {
@@ -779,7 +1025,7 @@ function renderItemsList() {
   const list = document.getElementById('itemsList');
   const empty = document.getElementById('emptyState');
   list.innerHTML = '';
-  empty.classList.toggle('hidden', listItems.length > 0);
+  empty.classList.toggle('hidden', !currentListId || listItems.length > 0);
 
   groupItemsForDisplay(listItems).forEach(({ group, items }) => {
     const heading = document.createElement('h3');
@@ -822,7 +1068,7 @@ function renderPrices() {
   const list = document.getElementById('pricesList');
   const empty = document.getElementById('pricesEmptyState');
   list.innerHTML = '';
-  empty.classList.toggle('hidden', listItems.length > 0);
+  empty.classList.toggle('hidden', !currentListId || listItems.length > 0);
 
   const defaultChain = householdStores.find((s) => s.is_default)?.chain;
   let totalDefault = 0, totalBest = 0, havePrices = false;
@@ -890,6 +1136,66 @@ function renderPrices() {
   } else {
     banner.style.display = 'none';
   }
+}
+
+// ---------------------------------------------------------------------------
+// Analytics - how often items actually get bought (from completed lists only,
+// not lists still in progress - see plan doc rationale)
+// ---------------------------------------------------------------------------
+async function loadAnalytics() {
+  const { data: completedLists } = await sb
+    .from('shopping_lists')
+    .select('id, list_date, created_at')
+    .eq('household_id', profile.household_id)
+    .eq('status', 'completed');
+
+  if (!completedLists || completedLists.length === 0) {
+    renderAnalytics([]);
+    return;
+  }
+  const listDateById = Object.fromEntries(completedLists.map((l) => [l.id, l.list_date ?? l.created_at]));
+
+  const { data: items } = await sb
+    .from('list_items')
+    .select('label, category_key, list_id')
+    .in('list_id', completedLists.map((l) => l.id));
+
+  const stats = {};
+  (items ?? []).forEach((item) => {
+    const key = item.category_key ?? item.label.toLowerCase();
+    const date = listDateById[item.list_id];
+    stats[key] ??= { label: item.label, count: 0, dates: [] };
+    stats[key].count++;
+    stats[key].dates.push(date);
+  });
+
+  const rows = Object.values(stats)
+    .map((s) => {
+      const sorted = [...s.dates].sort();
+      return { label: s.label, count: s.count, first: sorted[0], last: sorted[sorted.length - 1] };
+    })
+    .sort((a, b) => b.count - a.count);
+
+  renderAnalytics(rows);
+}
+
+function renderAnalytics(rows) {
+  const list = document.getElementById('analyticsList');
+  document.getElementById('analyticsEmptyState').classList.toggle('hidden', rows.length > 0);
+  list.innerHTML = rows
+    .map(
+      (r) => `
+        <div class="analytics-row">
+          <span class="item-icon">${classifyItem(r.label).icon}</span>
+          <div class="analytics-row-info">
+            <div class="analytics-row-label">${r.label}</div>
+            <div class="analytics-row-dates">First ${formatListDate(r.first)} · Last ${formatListDate(r.last)}</div>
+          </div>
+          <div class="analytics-row-count">×${r.count}</div>
+        </div>
+      `,
+    )
+    .join('');
 }
 
 // ---------------------------------------------------------------------------
@@ -1036,8 +1342,11 @@ document.getElementById('joinHouseholdBtn').onclick = async () => {
     profile = p;
     await loadStores();
     await loadCategoryRules();
+    localStorage.removeItem(LIST_STORAGE_KEY); // old list's id belongs to the previous household
+    await loadLists();
     await loadItems();
     await loadSettings();
+    await loadAnalytics();
   } finally {
     btn.disabled = false;
   }

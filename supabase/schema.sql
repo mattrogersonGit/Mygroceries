@@ -61,11 +61,26 @@ create table price_history (
 );
 create index price_history_product_idx on price_history (product_id, captured_at);
 
--- ---------- shopping list ----------
+-- ---------- shopping lists ----------
+
+-- A household can have several lists at once (e.g. an ongoing "Essentials"
+-- list alongside a one-off dated list) - not a single ambient list.
+create table shopping_lists (
+  id uuid primary key default gen_random_uuid(),
+  household_id uuid not null references households(id) on delete cascade,
+  name text not null,
+  list_date date,                 -- optional; a reusable template like "Essentials" may not need one
+  status text not null default 'active' check (status in ('active', 'completed')),
+  completed_at timestamptz,
+  created_by uuid references profiles(id),
+  created_at timestamptz not null default now()
+);
+create index shopping_lists_household_idx on shopping_lists (household_id);
 
 create table list_items (
   id uuid primary key default gen_random_uuid(),
   household_id uuid not null references households(id) on delete cascade,
+  list_id uuid not null references shopping_lists(id) on delete cascade,
   label text not null,                        -- what you typed, e.g. "2L milk"
   match_type text not null check (match_type in ('category', 'product')),
   category_key text,                          -- used when match_type = 'category'
@@ -77,6 +92,7 @@ create table list_items (
   created_at timestamptz not null default now()
 );
 create index list_items_household_idx on list_items (household_id);
+create index list_items_list_idx on list_items (list_id);
 
 -- Household-defined overrides for the built-in keyword -> (aisle group, icon)
 -- guesses in index.html's ITEM_GROUP_RULES (e.g. "margarine" isn't recognised
@@ -99,6 +115,7 @@ create index item_category_rules_household_idx on item_category_rules (household
 alter table households enable row level security;
 alter table profiles enable row level security;
 alter table household_stores enable row level security;
+alter table shopping_lists enable row level security;
 alter table list_items enable row level security;
 alter table item_category_rules enable row level security;
 -- products / price_history are readable by anyone logged in (no household-specific data in them)
@@ -129,6 +146,10 @@ create policy "insert own profile" on profiles
   for insert with check (id = auth.uid());
 
 create policy "manage own household's stores" on household_stores
+  for all using (household_id = my_household_id())
+  with check (household_id = my_household_id());
+
+create policy "manage own household's lists" on shopping_lists
   for all using (household_id = my_household_id())
   with check (household_id = my_household_id());
 
