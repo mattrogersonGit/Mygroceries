@@ -142,6 +142,8 @@
   .list-tile-meta{ font-size:12px; color:var(--muted); margin-top:2px; }
   .list-tile-actions{ display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
   .list-rename-input{ font-size:14px; padding:6px 8px; }
+  .list-tile-import-row{ flex:1 1 100%; }
+  .list-tile-import-row select{ width:auto; flex:1; min-width:140px; font-size:13px; padding:6px 8px; }
   .analytics-row{ display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--border); font-size:13px; }
   .analytics-row:last-child{ border-bottom:none; }
   .analytics-row .item-icon{ flex:none; font-size:18px; width:22px; text-align:center; }
@@ -423,6 +425,7 @@ let allLists = []; // shopping_lists rows for this household
 let currentListId = localStorage.getItem('trolley_current_list_id') || null; // per-browser, not synced across household members
 const LIST_STORAGE_KEY = 'trolley_current_list_id';
 let editingListId = null; // list currently showing its inline rename input, if any
+let importingIntoListId = null; // active list currently showing its inline "import from" picker, if any
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -809,6 +812,15 @@ function renderMyLists() {
       if (e.key === 'Escape') { editingListId = null; renderMyLists(); }
     };
   });
+  document.querySelectorAll('.list-import-btn').forEach((btn) => {
+    btn.onclick = () => { importingIntoListId = btn.dataset.id; renderMyLists(); };
+  });
+  document.querySelectorAll('.list-import-cancel').forEach((btn) => {
+    btn.onclick = () => { importingIntoListId = null; renderMyLists(); };
+  });
+  document.querySelectorAll('.list-import-confirm').forEach((btn) => {
+    btn.onclick = () => importListInto(btn.dataset.id);
+  });
 
   const importSelect = document.getElementById('importFromSelect');
   const previousValue = importSelect.value;
@@ -836,6 +848,25 @@ function listTileHtml(list, isActive) {
     `;
   }
 
+  if (list.id === importingIntoListId) {
+    const otherLists = allLists.filter((l) => l.id !== list.id);
+    return `
+      <div class="list-tile${isCurrent ? ' current' : ''}">
+        <div class="list-tile-info">
+          <div class="list-tile-name">${list.name}</div>
+        </div>
+        <div class="list-tile-actions list-tile-import-row">
+          <select class="list-import-source" data-id="${list.id}">
+            <option value="">Pick a list to import from…</option>
+            ${otherLists.map((l) => `<option value="${l.id}">${l.name}</option>`).join('')}
+          </select>
+          <button type="button" class="small list-import-confirm" data-id="${list.id}">Import</button>
+          <button type="button" class="ghost small list-import-cancel" data-id="${list.id}">Cancel</button>
+        </div>
+      </div>
+    `;
+  }
+
   return `
     <div class="list-tile${isCurrent ? ' current' : ''}">
       <div class="list-tile-info">
@@ -845,6 +876,7 @@ function listTileHtml(list, isActive) {
       <div class="list-tile-actions">
         ${isActive ? `<button type="button" class="small${isCurrent ? '' : ' ghost'} list-select-btn" data-id="${list.id}">${isCurrent ? 'Selected' : 'Select'}</button>` : ''}
         <button type="button" class="ghost small list-rename-btn" data-id="${list.id}">Rename</button>
+        ${isActive ? `<button type="button" class="ghost small list-import-btn" data-id="${list.id}">Import into</button>` : ''}
         ${isActive ? `<button type="button" class="ghost small list-complete-btn" data-id="${list.id}">Mark complete</button>` : ''}
       </div>
     </div>
@@ -858,6 +890,39 @@ async function renameList(id) {
   await sb.from('shopping_lists').update({ name: newName }).eq('id', id);
   editingListId = null;
   await loadLists();
+}
+
+// Copies every item from sourceListId into targetListId as fresh rows
+// (unchecked, new ids) - used both when creating a new list with an import
+// source and when importing into an already-existing list. Always adds
+// copies rather than de-duplicating against what's already there - if you
+// import the same list twice you'll get two of everything, which is an
+// accepted, unsurprising outcome rather than something worth the complexity
+// of trying to detect "the same item" across free-text labels.
+async function copyListItemsInto(sourceListId, targetListId) {
+  const { data: sourceItems } = await sb.from('list_items').select('*').eq('list_id', sourceListId);
+  if (!sourceItems || sourceItems.length === 0) return;
+  await sb.from('list_items').insert(
+    sourceItems.map((item) => ({
+      household_id: profile.household_id,
+      list_id: targetListId,
+      label: item.label,
+      match_type: item.match_type,
+      category_key: item.category_key,
+      linked_products: item.linked_products,
+      created_by: profile.id,
+    })),
+  );
+}
+
+async function importListInto(targetListId) {
+  const select = document.querySelector(`.list-import-source[data-id="${targetListId}"]`);
+  const sourceListId = select.value;
+  if (!sourceListId) return;
+  await copyListItemsInto(sourceListId, targetListId);
+  importingIntoListId = null;
+  await loadLists();
+  if (targetListId === currentListId) await loadItems();
 }
 
 async function selectList(id) {
@@ -895,22 +960,7 @@ document.getElementById('createListForm').onsubmit = async (e) => {
     return;
   }
 
-  if (importFromId) {
-    const { data: sourceItems } = await sb.from('list_items').select('*').eq('list_id', importFromId);
-    if (sourceItems && sourceItems.length > 0) {
-      await sb.from('list_items').insert(
-        sourceItems.map((item) => ({
-          household_id: profile.household_id,
-          list_id: newList.id,
-          label: item.label,
-          match_type: item.match_type,
-          category_key: item.category_key,
-          linked_products: item.linked_products,
-          created_by: profile.id,
-        })),
-      );
-    }
-  }
+  if (importFromId) await copyListItemsInto(importFromId, newList.id);
 
   document.getElementById('newListName').value = '';
   document.getElementById('newListDate').value = '';
