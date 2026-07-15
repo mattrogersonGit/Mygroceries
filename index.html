@@ -112,6 +112,8 @@
   .save-status.ok{ color:var(--good); }
   .save-status.error{ color:var(--bad); }
   .settings-row{ display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); margin-bottom:10px; }
+  .household-name-edit{ display:flex; gap:8px; margin-bottom:10px; }
+  .household-name-edit input{ flex:1; }
   .settings-label{ color:var(--muted); font-size:13px; }
   .settings-value{ font-weight:600; font-size:13px; }
   .member-row{ display:flex; align-items:center; gap:8px; padding:6px 0; font-size:13px; }
@@ -324,6 +326,15 @@
           <span class="settings-label">Name</span>
           <span class="settings-value" id="householdName"></span>
         </div>
+        <div id="householdNameDisplay">
+          <button type="button" id="editHouseholdNameBtn" class="ghost small">Rename household</button>
+        </div>
+        <div id="householdNameEditForm" class="hidden household-name-edit">
+          <input id="householdNameInput" placeholder="Household name" />
+          <button type="button" id="saveHouseholdNameBtn" class="small">Save</button>
+          <button type="button" id="cancelHouseholdNameBtn" class="ghost small">Cancel</button>
+        </div>
+        <span id="householdNameStatus" class="save-status"></span>
         <h3 class="my-stores-heading">Members</h3>
         <div id="householdMembers"></div>
 
@@ -1396,6 +1407,34 @@ document.getElementById('addRuleForm').onsubmit = async (e) => {
 
 document.getElementById('signOutBtn').onclick = async () => {
   await sb.auth.signOut();
+};
+
+document.getElementById('editHouseholdNameBtn').onclick = () => {
+  document.getElementById('householdNameInput').value = document.getElementById('householdName').textContent;
+  document.getElementById('householdNameDisplay').classList.add('hidden');
+  document.getElementById('householdNameEditForm').classList.remove('hidden');
+};
+
+document.getElementById('cancelHouseholdNameBtn').onclick = () => {
+  document.getElementById('householdNameEditForm').classList.add('hidden');
+  document.getElementById('householdNameDisplay').classList.remove('hidden');
+};
+
+document.getElementById('saveHouseholdNameBtn').onclick = async () => {
+  const status = document.getElementById('householdNameStatus');
+  const newName = document.getElementById('householdNameInput').value.trim();
+  if (!newName) { status.textContent = 'Enter a name first.'; status.className = 'save-status error'; return; }
+
+  const { error } = await sb.from('households').update({ name: newName }).eq('id', profile.household_id);
+  if (error) {
+    status.textContent = error.message;
+    status.className = 'save-status error';
+    return;
+  }
+  status.textContent = '';
+  document.getElementById('householdNameEditForm').classList.add('hidden');
+  document.getElementById('householdNameDisplay').classList.remove('hidden');
+  await loadSettings();
 };
 
 document.getElementById('copyInviteBtn').onclick = async () => {

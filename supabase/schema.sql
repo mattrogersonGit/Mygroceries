@@ -137,6 +137,9 @@ $$;
 
 create policy "read own household" on households
   for select using (id = my_household_id());
+create policy "update own household" on households
+  for update using (id = my_household_id())
+  with check (id = my_household_id());
 
 create policy "read own profile + household members" on profiles
   for select using (household_id = my_household_id() or id = auth.uid());
