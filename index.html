@@ -111,15 +111,24 @@
   .save-status{ margin-left:10px; font-size:12px; }
   .save-status.ok{ color:var(--good); }
   .save-status.error{ color:var(--bad); }
+  .settings-row{ display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); margin-bottom:10px; }
+  .settings-label{ color:var(--muted); font-size:13px; }
+  .settings-value{ font-weight:600; font-size:13px; }
+  .member-row{ display:flex; align-items:center; gap:8px; padding:6px 0; font-size:13px; }
+  .member-avatar{
+    width:26px; height:26px; border-radius:50%; background:var(--panel-2); border:1px solid var(--border);
+    display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; color:var(--accent); flex:none;
+  }
   #addItemForm{ display:flex; gap:8px; margin-bottom:14px; }
   .item{
     border-bottom:1px solid var(--border); padding:12px 0;
   }
   .item:last-child{ border-bottom:none; }
-  .item-top{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
-  .item-label{ font-weight:600; }
-  .item-label input[type=checkbox]{ margin-right:8px; }
-  .item-actions button{ background:transparent; color:var(--muted); border:none; font-size:16px; padding:2px 6px; }
+  .item-top{ display:flex; align-items:center; gap:10px; }
+  .item-check{ flex:none; width:18px; height:18px; accent-color:var(--accent); }
+  .item-icon{ flex:none; font-size:19px; line-height:1; width:22px; text-align:center; }
+  .item-label{ flex:1; min-width:0; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .item-delete{ flex:none; background:transparent; color:var(--muted); border:none; font-size:16px; padding:2px 6px; }
   .price-table{ display:grid; grid-template-columns:1fr auto auto; gap:4px 12px; margin-top:8px; font-family:var(--mono); font-size:13px; }
   .price-table .chain{ color:var(--muted); }
   .price-table .price{ text-align:right; }
@@ -216,6 +225,45 @@
         <p class="empty hidden" id="pricesEmptyState">Your list is empty — add items on the List tab first.</p>
       </section>
     </div>
+
+    <div class="page" id="page-settings">
+      <section class="card">
+        <h2>Account</h2>
+        <div class="settings-row">
+          <span class="settings-label">Signed in as</span>
+          <span class="settings-value" id="settingsEmail"></span>
+        </div>
+        <button id="signOutBtn" type="button" class="ghost small">Sign out</button>
+      </section>
+
+      <section class="card">
+        <h2>Household</h2>
+        <div class="settings-row">
+          <span class="settings-label">Name</span>
+          <span class="settings-value" id="householdName"></span>
+        </div>
+        <h3 class="my-stores-heading">Members</h3>
+        <div id="householdMembers"></div>
+
+        <h3 class="my-stores-heading">Invite someone</h3>
+        <p class="muted">Share this code — once they've signed up, they enter it below (on their own device) to join your household and share this list.</p>
+        <div class="row">
+          <input id="inviteCodeDisplay" readonly />
+          <button id="copyInviteBtn" type="button" class="ghost">Copy</button>
+        </div>
+        <span id="copyInviteStatus" class="save-status"></span>
+      </section>
+
+      <section class="card">
+        <h2>Join a different household</h2>
+        <p class="muted">Got an invite code from someone else? Entering it switches you into their household (and out of this one).</p>
+        <div class="row">
+          <input id="joinCodeInput" placeholder="e.g. A1B2C3" />
+          <button id="joinHouseholdBtn" type="button">Join</button>
+        </div>
+        <span id="joinHouseholdStatus" class="save-status"></span>
+      </section>
+    </div>
   </main>
 
   <nav id="bottom-nav">
@@ -230,6 +278,10 @@
     <button class="nav-item" onclick="navTo('prices',this)" aria-label="Prices">
       <svg viewBox="0 0 24 24"><path d="M20.59 13.41L13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
       Prices
+    </button>
+    <button class="nav-item" onclick="navTo('settings',this)" aria-label="Settings">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      Settings
     </button>
   </nav>
 </div>
@@ -299,6 +351,7 @@ async function onSignedIn(s) {
   document.getElementById('who').textContent = profile?.display_name ?? session.user.email;
   await loadStores();
   await loadItems();
+  await loadSettings();
 }
 
 function showAuthScreen() {
@@ -623,6 +676,26 @@ async function fetchPricesForItems() {
   });
 }
 
+// Lightweight keyword match for a representative emoji - not exhaustive, just
+// covers common grocery items with a sensible cart fallback for anything else.
+const ITEM_ICON_RULES = [
+  [/milk/i, '🥛'], [/bread|toast|bun|bagel/i, '🍞'], [/\begg/i, '🥚'], [/cheese/i, '🧀'],
+  [/chicken/i, '🍗'], [/beef|steak|mince|lamb|pork/i, '🥩'], [/fish|salmon|tuna/i, '🐟'],
+  [/bacon|ham|sausage/i, '🥓'], [/apple/i, '🍎'], [/banana/i, '🍌'], [/orange|mandarin|citrus/i, '🍊'],
+  [/grape/i, '🍇'], [/berry|berries/i, '🍓'], [/potato/i, '🥔'], [/tomato/i, '🍅'],
+  [/carrot/i, '🥕'], [/onion|garlic/i, '🧅'], [/lettuce|salad|spinach|greens/i, '🥬'],
+  [/avocado/i, '🥑'], [/rice/i, '🍚'], [/pasta|noodle|spaghetti/i, '🍝'], [/cereal|muesli/i, '🥣'],
+  [/coffee/i, '☕'], [/\btea\b/i, '🍵'], [/juice/i, '🧃'], [/water/i, '💧'],
+  [/wine/i, '🍷'], [/beer/i, '🍺'], [/chocolate|choc\b/i, '🍫'], [/chip|crisp/i, '🍟'],
+  [/biscuit|cookie/i, '🍪'], [/cake/i, '🍰'], [/yog(h)?urt/i, '🥣'], [/butter|marg/i, '🧈'],
+  [/oil\b/i, '🫙'], [/honey/i, '🍯'], [/soap|detergent|dishwash/i, '🧼'],
+  [/toilet paper|tissue|paper towel/i, '🧻'], [/nappy|diaper/i, '🍼'], [/frozen/i, '🧊'],
+];
+function itemIcon(label) {
+  const rule = ITEM_ICON_RULES.find(([re]) => re.test(label));
+  return rule ? rule[1] : '🛒';
+}
+
 // Interactive list management (add/check/delete) - no price data here, that's
 // the Prices tab's job.
 function renderItemsList() {
@@ -636,11 +709,10 @@ function renderItemsList() {
     div.className = 'item';
     div.innerHTML = `
       <div class="item-top">
-        <span class="item-label">
-          <input type="checkbox" ${item.checked ? 'checked' : ''} data-id="${item.id}" class="item-check" />
-          ${item.label}
-        </span>
-        <span class="item-actions"><button data-id="${item.id}" class="item-delete">✕</button></span>
+        <input type="checkbox" ${item.checked ? 'checked' : ''} data-id="${item.id}" class="item-check" aria-label="Mark ${item.label} as picked up" />
+        <span class="item-icon">${itemIcon(item.label)}</span>
+        <span class="item-label">${item.label}</span>
+        <button data-id="${item.id}" class="item-delete" aria-label="Remove ${item.label}">✕</button>
       </div>
     `;
     list.appendChild(div);
@@ -712,6 +784,7 @@ function renderPrices() {
 
     div.innerHTML = `
       <div class="item-top">
+        <span class="item-icon">${itemIcon(item.label)}</span>
         <span class="item-label${item.checked ? ' checked-off' : ''}">${item.label}</span>
       </div>
       ${tableHtml}
@@ -727,6 +800,81 @@ function renderPrices() {
     banner.style.display = 'none';
   }
 }
+
+// ---------------------------------------------------------------------------
+// Settings (account, household, invite)
+// ---------------------------------------------------------------------------
+async function loadSettings() {
+  document.getElementById('settingsEmail').textContent = session.user.email;
+
+  const { data: household } = await sb.from('households').select('*').eq('id', profile.household_id).single();
+  document.getElementById('householdName').textContent = household?.name ?? '—';
+  document.getElementById('inviteCodeDisplay').value = household?.invite_code ?? '';
+
+  const { data: members } = await sb
+    .from('profiles')
+    .select('*')
+    .eq('household_id', profile.household_id)
+    .order('created_at', { ascending: true });
+  document.getElementById('householdMembers').innerHTML = (members ?? [])
+    .map((m) => {
+      const name = m.display_name ?? 'Household member';
+      const initial = name.slice(0, 1).toUpperCase();
+      return `
+        <div class="member-row">
+          <span class="member-avatar">${initial}</span>
+          <span>${name}${m.id === profile.id ? ' <span class="muted">(you)</span>' : ''}</span>
+        </div>
+      `;
+    })
+    .join('');
+}
+
+document.getElementById('signOutBtn').onclick = async () => {
+  await sb.auth.signOut();
+};
+
+document.getElementById('copyInviteBtn').onclick = async () => {
+  const status = document.getElementById('copyInviteStatus');
+  try {
+    await navigator.clipboard.writeText(document.getElementById('inviteCodeDisplay').value);
+    status.textContent = 'Copied.';
+    status.className = 'save-status ok';
+  } catch {
+    status.textContent = "Couldn't copy - select and copy the code manually.";
+    status.className = 'save-status error';
+  }
+  setTimeout(() => { status.textContent = ''; }, 2500);
+};
+
+document.getElementById('joinHouseholdBtn').onclick = async () => {
+  const btn = document.getElementById('joinHouseholdBtn');
+  const status = document.getElementById('joinHouseholdStatus');
+  const code = document.getElementById('joinCodeInput').value.trim();
+  if (!code) { status.textContent = 'Enter a code first.'; status.className = 'save-status error'; return; }
+
+  btn.disabled = true;
+  status.textContent = '';
+  try {
+    const { error } = await sb.rpc('join_household', { invite_code_input: code });
+    if (error) {
+      status.textContent = error.message;
+      status.className = 'save-status error';
+      return;
+    }
+    status.textContent = 'Joined - refreshing your stores and list…';
+    status.className = 'save-status ok';
+    document.getElementById('joinCodeInput').value = '';
+
+    const { data: p } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
+    profile = p;
+    await loadStores();
+    await loadItems();
+    await loadSettings();
+  } finally {
+    btn.disabled = false;
+  }
+};
 
 // ---------------------------------------------------------------------------
 // Boot

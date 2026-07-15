@@ -9,6 +9,7 @@
 create table households (
   id uuid primary key default gen_random_uuid(),
   name text not null default 'My Household',
+  invite_code text unique not null default upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 6)),
   created_at timestamptz not null default now()
 );
 
@@ -156,8 +157,44 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function handle_new_user();
 
--- To invite a second household member: they sign up (gets their own household
--- automatically via the trigger above), then run, as an already-authenticated
--- admin action or manually in the SQL editor:
---   update profiles set household_id = '<existing-household-id>' where id = '<new-user-id>';
--- A simple "join household by invite code" UI can be added later if needed.
+-- ============================================================
+-- Join an existing household by invite code
+-- ============================================================
+
+-- security definer so the code lookup isn't limited by the "read own
+-- household" RLS policy (a user has to be able to look up a household they
+-- aren't in yet, by code, in order to join it). Only ever changes the
+-- CALLING user's own household_id (auth.uid()), never an arbitrary id passed
+-- in - that's what keeps this safe to expose to any authenticated user.
+--
+-- Known simplification: the "update own profile" policy below still allows
+-- a user to set their own household_id directly via a plain update (not just
+-- through this function) if they already know a target household's id -
+-- there's no column-level lock forcing the code check. Acceptable for a
+-- personal/family app where household ids aren't discoverable through the
+-- UI; would need tightening (e.g. revoking direct household_id updates) for
+-- a more adversarial multi-tenant setting.
+create or replace function join_household(invite_code_input text)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_household_id uuid;
+begin
+  select id into target_household_id from households where invite_code = upper(trim(invite_code_input));
+  if target_household_id is null then
+    raise exception 'Invalid invite code';
+  end if;
+  update profiles set household_id = target_household_id where id = auth.uid();
+  return target_household_id;
+end;
+$$;
+
+grant execute on function join_household(text) to authenticated;
+
+-- To invite a second household member: they sign up (gets their own
+-- household automatically via the trigger above), then in the app's Settings
+-- tab, enter your household's invite code (shown in your own Settings tab)
+-- to switch into your household - see join_household() above.
