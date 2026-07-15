@@ -13,6 +13,24 @@ const CHAIN_FACTORIES = {
 
 const DELAY_BETWEEN_SEARCHES_MS = 1500;
 
+// GitHub Actions' shared runner IPs get hard-challenged by Cloudflare Turnstile
+// on Pak'nSave/New World (confirmed - a real "verify you're human" checkbox,
+// not just a slow response) even though the exact same code sails through
+// cleanly from a normal home connection. Browserless.io runs the browser from
+// a different (non-datacenter-flagged) IP pool and includes CAPTCHA solving,
+// which is what actually fixes this for CI - not a local Chromium launch.
+// connectOverCDP() returns a standard Playwright Browser object, identical to
+// launch()'s, so nothing downstream (the chain modules) needs to know which
+// path was used. Falls back to a local launch when no token is set, so this
+// still works for local development/testing without needing an account.
+async function launchBrowser() {
+  const token = process.env.BROWSERLESS_TOKEN;
+  if (token) {
+    return chromium.connectOverCDP(`wss://production-sfo.browserless.io?token=${token}`);
+  }
+  return chromium.launch({ headless: true });
+}
+
 async function main() {
   const { data: stores, error: storesErr } = await supabase
     .from('household_stores')
@@ -33,7 +51,7 @@ async function main() {
   const summary = {}; // chain -> { upserted, errors: [] }
   let totalUpserted = 0;
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchBrowser();
 
   try {
     for (const chainKey of Object.keys(CHAIN_FACTORIES)) {
