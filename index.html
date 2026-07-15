@@ -120,6 +120,11 @@
     display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; color:var(--accent); flex:none;
   }
   #addItemForm{ display:flex; gap:8px; margin-bottom:14px; }
+  .item-group-heading{
+    font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:600;
+    margin:16px 0 4px;
+  }
+  .item-group-heading:first-child{ margin-top:0; }
   .item{
     border-bottom:1px solid var(--border); padding:12px 0;
   }
@@ -676,24 +681,63 @@ async function fetchPricesForItems() {
   });
 }
 
-// Lightweight keyword match for a representative emoji - not exhaustive, just
-// covers common grocery items with a sensible cart fallback for anything else.
-const ITEM_ICON_RULES = [
-  [/milk/i, '🥛'], [/bread|toast|bun|bagel/i, '🍞'], [/\begg/i, '🥚'], [/cheese/i, '🧀'],
-  [/chicken/i, '🍗'], [/beef|steak|mince|lamb|pork/i, '🥩'], [/fish|salmon|tuna/i, '🐟'],
-  [/bacon|ham|sausage/i, '🥓'], [/apple/i, '🍎'], [/banana/i, '🍌'], [/orange|mandarin|citrus/i, '🍊'],
-  [/grape/i, '🍇'], [/berry|berries/i, '🍓'], [/potato/i, '🥔'], [/tomato/i, '🍅'],
-  [/carrot/i, '🥕'], [/onion|garlic/i, '🧅'], [/lettuce|salad|spinach|greens/i, '🥬'],
-  [/avocado/i, '🥑'], [/rice/i, '🍚'], [/pasta|noodle|spaghetti/i, '🍝'], [/cereal|muesli/i, '🥣'],
-  [/coffee/i, '☕'], [/\btea\b/i, '🍵'], [/juice/i, '🧃'], [/water/i, '💧'],
-  [/wine/i, '🍷'], [/beer/i, '🍺'], [/chocolate|choc\b/i, '🍫'], [/chip|crisp/i, '🍟'],
-  [/biscuit|cookie/i, '🍪'], [/cake/i, '🍰'], [/yog(h)?urt/i, '🥣'], [/butter|marg/i, '🧈'],
-  [/oil\b/i, '🫙'], [/honey/i, '🍯'], [/soap|detergent|dishwash/i, '🧼'],
-  [/toilet paper|tissue|paper towel/i, '🧻'], [/nappy|diaper/i, '🍼'], [/frozen/i, '🧊'],
+// Lightweight keyword match for a representative emoji + aisle-style group -
+// not exhaustive, just covers common grocery items with a sensible fallback
+// for anything else. "group" here is a display-only grouping and unrelated
+// to list_items.category_key (which is the price-search term, a different
+// concept entirely) - kept named differently on purpose to avoid confusion.
+const ITEM_GROUP_RULES = [
+  [/milk|cheese|yog(h)?urt|butter|marg\b|cream/i, 'Dairy & Eggs', '🥛'],
+  [/\begg/i, 'Dairy & Eggs', '🥚'],
+  [/bread|toast|bun|bagel/i, 'Bakery', '🍞'],
+  [/cake|muffin|pastry|biscuit|cookie/i, 'Bakery', '🍪'],
+  [/chicken/i, 'Meat & Seafood', '🍗'],
+  [/beef|steak|mince|lamb|pork|bacon|ham|sausage/i, 'Meat & Seafood', '🥩'],
+  [/fish|salmon|tuna|seafood|prawn/i, 'Meat & Seafood', '🐟'],
+  [/apple/i, 'Fruit & Veg', '🍎'],
+  [/banana/i, 'Fruit & Veg', '🍌'],
+  [/orange|mandarin|citrus/i, 'Fruit & Veg', '🍊'],
+  [/grape/i, 'Fruit & Veg', '🍇'],
+  [/berry|berries/i, 'Fruit & Veg', '🍓'],
+  [/avocado/i, 'Fruit & Veg', '🥑'],
+  [/potato/i, 'Fruit & Veg', '🥔'],
+  [/tomato/i, 'Fruit & Veg', '🍅'],
+  [/carrot/i, 'Fruit & Veg', '🥕'],
+  [/onion|garlic/i, 'Fruit & Veg', '🧅'],
+  [/lettuce|salad|spinach|greens/i, 'Fruit & Veg', '🥬'],
+  [/rice/i, 'Pantry', '🍚'],
+  [/pasta|noodle|spaghetti/i, 'Pantry', '🍝'],
+  [/cereal|muesli/i, 'Pantry', '🥣'],
+  [/oil\b/i, 'Pantry', '🫙'],
+  [/honey|sauce|ketchup|mayo/i, 'Pantry', '🍯'],
+  [/chocolate|choc\b/i, 'Snacks', '🍫'],
+  [/chip|crisp/i, 'Snacks', '🍟'],
+  [/coffee/i, 'Drinks', '☕'],
+  [/\btea\b/i, 'Drinks', '🍵'],
+  [/juice/i, 'Drinks', '🧃'],
+  [/water/i, 'Drinks', '💧'],
+  [/wine/i, 'Drinks', '🍷'],
+  [/beer/i, 'Drinks', '🍺'],
+  [/frozen/i, 'Frozen', '🧊'],
+  [/soap|detergent|dishwash/i, 'Household', '🧼'],
+  [/toilet paper|tissue|paper towel/i, 'Household', '🧻'],
+  [/nappy|diaper/i, 'Household', '🍼'],
 ];
-function itemIcon(label) {
-  const rule = ITEM_ICON_RULES.find(([re]) => re.test(label));
-  return rule ? rule[1] : '🛒';
+const ITEM_GROUP_ORDER = [
+  'Fruit & Veg', 'Bakery', 'Meat & Seafood', 'Dairy & Eggs', 'Pantry',
+  'Frozen', 'Drinks', 'Snacks', 'Household', 'Other',
+];
+function classifyItem(label) {
+  const rule = ITEM_GROUP_RULES.find(([re]) => re.test(label));
+  return rule ? { group: rule[1], icon: rule[2] } : { group: 'Other', icon: '🛒' };
+}
+function groupItemsForDisplay(items) {
+  const groups = {};
+  items.forEach((item) => {
+    const { group } = classifyItem(item.label);
+    (groups[group] ??= []).push(item);
+  });
+  return ITEM_GROUP_ORDER.map((group) => ({ group, items: groups[group] ?? [] })).filter((g) => g.items.length > 0);
 }
 
 // Interactive list management (add/check/delete) - no price data here, that's
@@ -704,18 +748,25 @@ function renderItemsList() {
   list.innerHTML = '';
   empty.classList.toggle('hidden', listItems.length > 0);
 
-  listItems.forEach((item) => {
-    const div = document.createElement('div');
-    div.className = 'item';
-    div.innerHTML = `
-      <div class="item-top">
-        <input type="checkbox" ${item.checked ? 'checked' : ''} data-id="${item.id}" class="item-check" aria-label="Mark ${item.label} as picked up" />
-        <span class="item-icon">${itemIcon(item.label)}</span>
-        <span class="item-label">${item.label}</span>
-        <button data-id="${item.id}" class="item-delete" aria-label="Remove ${item.label}">✕</button>
-      </div>
-    `;
-    list.appendChild(div);
+  groupItemsForDisplay(listItems).forEach(({ group, items }) => {
+    const heading = document.createElement('h3');
+    heading.className = 'item-group-heading';
+    heading.textContent = group;
+    list.appendChild(heading);
+
+    items.forEach((item) => {
+      const div = document.createElement('div');
+      div.className = 'item';
+      div.innerHTML = `
+        <div class="item-top">
+          <input type="checkbox" ${item.checked ? 'checked' : ''} data-id="${item.id}" class="item-check" aria-label="Mark ${item.label} as picked up" />
+          <span class="item-icon">${classifyItem(item.label).icon}</span>
+          <span class="item-label">${item.label}</span>
+          <button data-id="${item.id}" class="item-delete" aria-label="Remove ${item.label}">✕</button>
+        </div>
+      `;
+      list.appendChild(div);
+    });
   });
 
   document.querySelectorAll('.item-check').forEach((cb) => {
@@ -743,7 +794,13 @@ function renderPrices() {
   const defaultChain = householdStores.find((s) => s.is_default)?.chain;
   let totalDefault = 0, totalBest = 0, havePrices = false;
 
-  listItems.forEach((item) => {
+  groupItemsForDisplay(listItems).forEach(({ group, items }) => {
+    const heading = document.createElement('h3');
+    heading.className = 'item-group-heading';
+    heading.textContent = group;
+    list.appendChild(heading);
+
+    items.forEach((item) => {
     const div = document.createElement('div');
     div.className = 'item';
     const prices = latestPrices[item.category_key] ?? [];
@@ -784,12 +841,13 @@ function renderPrices() {
 
     div.innerHTML = `
       <div class="item-top">
-        <span class="item-icon">${itemIcon(item.label)}</span>
+        <span class="item-icon">${classifyItem(item.label).icon}</span>
         <span class="item-label${item.checked ? ' checked-off' : ''}">${item.label}</span>
       </div>
       ${tableHtml}
     `;
     list.appendChild(div);
+    });
   });
 
   const banner = document.getElementById('savingsBanner');
