@@ -108,6 +108,39 @@ create table item_category_rules (
 );
 create index item_category_rules_household_idx on item_category_rules (household_id);
 
+-- ---------- receipts (photo/PDF scans, kept separate from scraped products) ----------
+
+-- Free-text OCR from a receipt has no stable retailer product id to match
+-- against the scraper's `products` table, so receipts get their own tables
+-- rather than being merged in - avoids silently polluting price_history with
+-- AI-misread prices.
+create table receipts (
+  id uuid primary key default gen_random_uuid(),
+  household_id uuid not null references households(id) on delete cascade,
+  list_id uuid references shopping_lists(id) on delete set null,
+  chain text,                     -- free text, not constrained to the scraper's 3 chains
+  store_label text,
+  receipt_date date,
+  total numeric(10,2),
+  image_path text not null,       -- Supabase Storage object path
+  status text not null default 'pending' check (status in ('pending', 'confirmed', 'failed')),
+  raw_ai_response jsonb,          -- kept for debugging/reprocessing if extraction was poor
+  created_by uuid references profiles(id),
+  created_at timestamptz not null default now()
+);
+create index receipts_household_idx on receipts (household_id);
+
+create table receipt_items (
+  id uuid primary key default gen_random_uuid(),
+  household_id uuid not null references households(id) on delete cascade,  -- denormalized, same pattern as list_items
+  receipt_id uuid not null references receipts(id) on delete cascade,
+  label text not null,
+  price numeric(10,2) not null,
+  matched_list_item_id uuid references list_items(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index receipt_items_receipt_idx on receipt_items (receipt_id);
+
 -- ============================================================
 -- Row level security — everything scoped to "my household"
 -- ============================================================
@@ -118,6 +151,8 @@ alter table household_stores enable row level security;
 alter table shopping_lists enable row level security;
 alter table list_items enable row level security;
 alter table item_category_rules enable row level security;
+alter table receipts enable row level security;
+alter table receipt_items enable row level security;
 -- products / price_history are readable by anyone logged in (no household-specific data in them)
 alter table products enable row level security;
 alter table price_history enable row level security;
@@ -163,6 +198,37 @@ create policy "manage own household's list" on list_items
 create policy "manage own household's category rules" on item_category_rules
   for all using (household_id = my_household_id())
   with check (household_id = my_household_id());
+
+create policy "manage own household's receipts" on receipts
+  for all using (household_id = my_household_id())
+  with check (household_id = my_household_id());
+
+create policy "manage own household's receipt items" on receipt_items
+  for all using (household_id = my_household_id())
+  with check (household_id = my_household_id());
+
+-- ============================================================
+-- Storage — receipts bucket (private, household-scoped by path)
+-- ============================================================
+
+-- Uploaded images/PDFs are stored at "<household_id>/<receipt id>.<ext>" so
+-- the household id embedded in the object path can be checked against
+-- my_household_id() without a second table lookup. Bucket itself is created
+-- as private via the Supabase dashboard (Storage > New bucket, "Public" off);
+-- these policies are what actually enforce per-household access on top of that.
+insert into storage.buckets (id, name, public)
+values ('receipts', 'receipts', false)
+on conflict (id) do nothing;
+
+create policy "household can manage own receipt files" on storage.objects
+  for all using (
+    bucket_id = 'receipts'
+    and (storage.foldername(name))[1] = my_household_id()::text
+  )
+  with check (
+    bucket_id = 'receipts'
+    and (storage.foldername(name))[1] = my_household_id()::text
+  );
 
 create policy "anyone logged in can read products" on products
   for select using (auth.role() = 'authenticated');

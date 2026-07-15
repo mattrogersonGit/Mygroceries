@@ -153,6 +153,23 @@
   .analytics-row-label{ font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .analytics-row-dates{ font-size:11px; color:var(--muted); margin-top:1px; }
   .analytics-row-count{ flex:none; font-family:var(--mono); font-size:13px; color:var(--accent); font-weight:600; text-align:right; }
+  .receipt-items-editor{ display:flex; flex-direction:column; gap:6px; margin:10px 0; }
+  .receipt-item-row{ display:grid; grid-template-columns:1fr 90px auto; gap:6px; align-items:center; }
+  .receipt-item-row.has-match{ grid-template-columns:1fr 90px 1fr auto; }
+  .receipt-item-row select{ font-size:12px; }
+  .receipt-total-row{ align-items:center; margin-top:10px; }
+  .receipt-total-row input{ flex:0 0 110px; }
+  .receipt-match-toggle{ display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted); margin:12px 0; }
+  .receipt-tile{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:8px;
+    background:var(--panel-2); cursor:pointer;
+  }
+  .receipt-tile-info{ min-width:0; }
+  .receipt-tile-store{ font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .receipt-tile-meta{ font-size:11px; color:var(--muted); margin-top:1px; }
+  .receipt-tile-total{ flex:none; font-family:var(--mono); font-size:13px; font-weight:600; text-align:right; }
+  .receipt-tile.status-failed .receipt-tile-store::after{ content:' (failed)'; color:var(--danger,#c0392b); font-weight:400; }
   #addItemForm{ display:flex; gap:8px; margin-bottom:14px; }
   .item-group-heading{
     font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:600;
@@ -303,6 +320,44 @@
 
     <div class="page" id="page-analytics">
       <section class="card">
+        <h2>Scan a receipt</h2>
+        <p class="muted">Photograph or upload a receipt and Claude will read off the store, date, and items for you to check before saving. Nothing is saved until you review and confirm it.</p>
+        <input type="file" id="receiptFileInput" accept="image/*,.pdf" capture="environment" class="hidden" />
+        <button type="button" id="scanReceiptBtn" class="small">Scan a receipt</button>
+        <span id="receiptUploadStatus" class="save-status"></span>
+      </section>
+
+      <section class="card hidden" id="receiptReviewCard">
+        <h2>Review receipt</h2>
+        <p class="muted" id="receiptReviewNote"></p>
+        <div class="row">
+          <input id="receiptStoreInput" placeholder="Store name" />
+          <input id="receiptDateInput" type="date" />
+        </div>
+        <div id="receiptItemsEditor" class="receipt-items-editor"></div>
+        <button type="button" id="addReceiptItemBtn" class="ghost small">+ Add item</button>
+        <div class="row receipt-total-row">
+          <span class="settings-label">Total</span>
+          <input id="receiptTotalInput" type="number" step="0.01" placeholder="0.00" />
+        </div>
+        <label class="receipt-match-toggle hidden" id="receiptMatchToggleRow">
+          <input type="checkbox" id="receiptMarkMatchedInput" />
+          Also mark matched items as picked up in the list
+        </label>
+        <div class="row">
+          <button type="button" id="saveReceiptBtn" class="small">Save receipt</button>
+          <button type="button" id="cancelReceiptBtn" class="ghost small">Cancel</button>
+        </div>
+        <span id="receiptSaveStatus" class="save-status"></span>
+      </section>
+
+      <section class="card">
+        <h2>Recent receipts</h2>
+        <div id="recentReceiptsList"></div>
+        <p class="empty hidden" id="recentReceiptsEmptyState">No receipts scanned yet.</p>
+      </section>
+
+      <section class="card">
         <h2>Purchase frequency</h2>
         <p class="muted">Based on items in lists you've marked complete — how often each item actually gets bought.</p>
         <div id="analyticsList"></div>
@@ -427,6 +482,11 @@ let latestPrices = {}; // category_key -> [{chain, name, price}]
 let pendingSelection = {}; // chain -> {chain, id, name, address, lat, lng} | null
 let pendingDefaultChain = null;
 let leafletMap = null;
+
+// Receipt review state
+let editingReceiptId = null;
+let receiptListId = null; // list_id linked to the receipt being reviewed, if any
+let receiptMatchOptions = []; // [{id, label}] items from receiptListId, for the "matches list item" dropdowns
 let markersLayer = null;
 let lastResultsById = {}; // id -> store, for the currently rendered search results
 let customCategoryRules = []; // [{id, keyword, category, icon}] - household overrides, checked before ITEM_GROUP_RULES
@@ -477,6 +537,7 @@ async function onSignedIn(s) {
   await loadItems();
   await loadSettings();
   await loadAnalytics();
+  await loadRecentReceipts();
 }
 
 function showAuthScreen() {
@@ -1299,6 +1360,300 @@ function renderAnalytics(rows) {
       `,
     )
     .join('');
+}
+
+// ---------------------------------------------------------------------------
+// Receipt scanning — photo/PDF -> Claude draft -> user review -> save.
+// Nothing from the AI draft ever reaches receipt_items directly; the review
+// screen's edited values are always what gets written on save.
+// ---------------------------------------------------------------------------
+function escapeAttr(str) {
+  return String(str ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+document.getElementById('scanReceiptBtn').onclick = () => {
+  document.getElementById('receiptFileInput').click();
+};
+
+document.getElementById('receiptFileInput').onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = ''; // allow re-selecting the same file later
+  if (file) await handleReceiptFileSelected(file);
+};
+
+async function handleReceiptFileSelected(file) {
+  const status = document.getElementById('receiptUploadStatus');
+  status.textContent = 'Uploading…';
+  status.className = 'save-status';
+  try {
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+    const receiptId = crypto.randomUUID();
+    const path = `${profile.household_id}/${receiptId}.${ext}`;
+
+    const { error: uploadErr } = await sb.storage.from('receipts').upload(path, file, {
+      contentType: file.type || undefined,
+    });
+    if (uploadErr) throw uploadErr;
+
+    const { error: insertErr } = await sb.from('receipts').insert({
+      id: receiptId,
+      household_id: profile.household_id,
+      list_id: currentListId || null,
+      image_path: path,
+      created_by: profile.id,
+    });
+    if (insertErr) throw insertErr;
+
+    status.textContent = 'Reading receipt…';
+
+    const { data: fnData, error: fnErr } = await sb.functions.invoke('analyze-receipt', {
+      body: { receipt_id: receiptId },
+    });
+    if (fnErr) {
+      let message = fnErr.message;
+      try {
+        const body = await fnErr.context.json();
+        if (body?.error) message = body.error;
+      } catch { /* fall back to fnErr.message below */ }
+      throw new Error(message);
+    }
+    if (fnData?.error) throw new Error(fnData.error);
+
+    status.textContent = '';
+    await openReceiptReview({
+      receiptId,
+      listId: currentListId || null,
+      storeLabel: fnData.draft.store_label ?? '',
+      receiptDate: fnData.draft.receipt_date ?? '',
+      total: fnData.draft.total ?? '',
+      items: fnData.draft.items ?? [],
+      note: "Check every field below — Claude's reading can miss or misread items, especially on blurry photos.",
+    });
+  } catch (err) {
+    status.textContent = `Couldn't read that receipt: ${err.message}`;
+    status.className = 'save-status error';
+  } finally {
+    await loadRecentReceipts();
+  }
+}
+
+async function openReceiptReview({ receiptId, listId, storeLabel, receiptDate, total, items, note }) {
+  editingReceiptId = receiptId;
+  receiptListId = listId;
+  receiptMatchOptions = [];
+
+  if (listId) {
+    const { data } = await sb.from('list_items').select('id, label').eq('list_id', listId);
+    receiptMatchOptions = data ?? [];
+  }
+
+  document.getElementById('receiptReviewNote').textContent = note ?? '';
+  document.getElementById('receiptStoreInput').value = storeLabel ?? '';
+  document.getElementById('receiptDateInput').value = receiptDate ?? '';
+  document.getElementById('receiptTotalInput').value = total ?? '';
+  document.getElementById('receiptMatchToggleRow').classList.toggle('hidden', receiptMatchOptions.length === 0);
+  document.getElementById('receiptMarkMatchedInput').checked = false;
+
+  renderReceiptItemsEditor(
+    items.map((i) => ({
+      label: i.label,
+      price: i.price,
+      matchedId: i.matchedId !== undefined ? i.matchedId : guessMatch(i.label),
+    })),
+  );
+
+  document.getElementById('receiptSaveStatus').textContent = '';
+  document.getElementById('receiptReviewCard').classList.remove('hidden');
+  document.getElementById('receiptReviewCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// Best-effort exact/substring match against the linked list's items - purely
+// a starting point for the dropdown. Never applied automatically; the user
+// confirms or changes every row before anything is saved.
+function guessMatch(label) {
+  const needle = (label ?? '').toLowerCase().trim();
+  if (!needle) return '';
+  const exact = receiptMatchOptions.find((i) => i.label.toLowerCase().trim() === needle);
+  if (exact) return exact.id;
+  const partial = receiptMatchOptions.find(
+    (i) => needle.includes(i.label.toLowerCase().trim()) || i.label.toLowerCase().includes(needle),
+  );
+  return partial ? partial.id : '';
+}
+
+function matchSelectHtml(matchedId) {
+  const options = receiptMatchOptions
+    .map((i) => `<option value="${i.id}" ${i.id === matchedId ? 'selected' : ''}>${escapeAttr(i.label)}</option>`)
+    .join('');
+  return `<select class="receipt-item-match"><option value="">No match</option>${options}</select>`;
+}
+
+function receiptItemRowHtml(label, price, matchedId) {
+  const hasMatch = receiptMatchOptions.length > 0;
+  return `
+    <div class="receipt-item-row${hasMatch ? ' has-match' : ''}">
+      <input class="receipt-item-label" value="${escapeAttr(label)}" placeholder="Item" />
+      <input class="receipt-item-price" type="number" step="0.01" value="${price ?? ''}" placeholder="0.00" />
+      ${hasMatch ? matchSelectHtml(matchedId) : ''}
+      <button type="button" class="ghost small receipt-item-remove" aria-label="Remove item">✕</button>
+    </div>
+  `;
+}
+
+function renderReceiptItemsEditor(items) {
+  document.getElementById('receiptItemsEditor').innerHTML = items
+    .map((i) => receiptItemRowHtml(i.label, i.price, i.matchedId))
+    .join('');
+}
+
+document.getElementById('addReceiptItemBtn').onclick = () => {
+  document.getElementById('receiptItemsEditor').insertAdjacentHTML('beforeend', receiptItemRowHtml('', '', ''));
+};
+
+document.addEventListener('click', (e) => {
+  const removeBtn = e.target.closest('.receipt-item-remove');
+  if (removeBtn) removeBtn.closest('.receipt-item-row').remove();
+});
+
+document.getElementById('cancelReceiptBtn').onclick = () => {
+  document.getElementById('receiptReviewCard').classList.add('hidden');
+  editingReceiptId = null;
+};
+
+document.getElementById('saveReceiptBtn').onclick = async () => {
+  const btn = document.getElementById('saveReceiptBtn');
+  const status = document.getElementById('receiptSaveStatus');
+  if (!editingReceiptId) return;
+
+  const rows = [...document.querySelectorAll('#receiptItemsEditor .receipt-item-row')]
+    .map((row) => ({
+      label: row.querySelector('.receipt-item-label').value.trim(),
+      price: parseFloat(row.querySelector('.receipt-item-price').value),
+      matchedId: row.querySelector('.receipt-item-match')?.value || null,
+    }))
+    .filter((r) => r.label && !Number.isNaN(r.price));
+
+  if (rows.length === 0) {
+    status.textContent = 'Add at least one item with a price before saving.';
+    status.className = 'save-status error';
+    return;
+  }
+
+  btn.disabled = true;
+  status.textContent = 'Saving…';
+  status.className = 'save-status';
+  try {
+    const storeLabel = document.getElementById('receiptStoreInput').value.trim() || null;
+    const receiptDate = document.getElementById('receiptDateInput').value || null;
+    const totalRaw = document.getElementById('receiptTotalInput').value;
+    const total = totalRaw === '' ? null : parseFloat(totalRaw);
+    const markMatched = document.getElementById('receiptMarkMatchedInput').checked;
+
+    const { error: updateErr } = await sb
+      .from('receipts')
+      .update({ store_label: storeLabel, chain: storeLabel, receipt_date: receiptDate, total, status: 'confirmed' })
+      .eq('id', editingReceiptId);
+    if (updateErr) throw updateErr;
+
+    // Replace any existing items for this receipt - covers both a fresh scan
+    // and re-editing a previously saved receipt without trying to diff rows.
+    const { error: deleteErr } = await sb.from('receipt_items').delete().eq('receipt_id', editingReceiptId);
+    if (deleteErr) throw deleteErr;
+
+    const { error: itemsInsertErr } = await sb.from('receipt_items').insert(
+      rows.map((r) => ({
+        household_id: profile.household_id,
+        receipt_id: editingReceiptId,
+        label: r.label,
+        price: r.price,
+        matched_list_item_id: r.matchedId,
+      })),
+    );
+    if (itemsInsertErr) throw itemsInsertErr;
+
+    if (markMatched) {
+      const matchedIds = rows.map((r) => r.matchedId).filter(Boolean);
+      if (matchedIds.length > 0) {
+        await sb.from('list_items').update({ checked: true }).in('id', matchedIds);
+        await loadItems(); // refresh the List tab if any matched items are in the currently open list
+      }
+    }
+
+    status.textContent = 'Receipt saved.';
+    status.className = 'save-status ok';
+    editingReceiptId = null;
+    document.getElementById('receiptReviewCard').classList.add('hidden');
+    await loadRecentReceipts();
+  } catch (err) {
+    status.textContent = err.message;
+    status.className = 'save-status error';
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+async function loadRecentReceipts() {
+  const { data } = await sb
+    .from('receipts')
+    .select('id, store_label, receipt_date, total, status, list_id, created_at, receipt_items(count)')
+    .eq('household_id', profile.household_id)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  renderRecentReceipts(data ?? []);
+}
+
+function renderRecentReceipts(rows) {
+  const list = document.getElementById('recentReceiptsList');
+  document.getElementById('recentReceiptsEmptyState').classList.toggle('hidden', rows.length > 0);
+  list.innerHTML = rows
+    .map((r) => {
+      const count = r.receipt_items?.[0]?.count ?? 0;
+      const dateLabel = r.receipt_date ? formatListDate(r.receipt_date) : formatListDate(r.created_at);
+      const totalLabel = r.total != null ? `$${Number(r.total).toFixed(2)}` : '—';
+      const storeLabel = r.status === 'pending' ? 'Reading…' : (r.store_label ?? 'Unknown store');
+      return `
+        <div class="receipt-tile status-${r.status}" data-id="${r.id}">
+          <div class="receipt-tile-info">
+            <div class="receipt-tile-store">${storeLabel}</div>
+            <div class="receipt-tile-meta">${dateLabel} · ${count} item${count === 1 ? '' : 's'}</div>
+          </div>
+          <div class="receipt-tile-total">${totalLabel}</div>
+        </div>
+      `;
+    })
+    .join('');
+}
+
+document.addEventListener('click', async (e) => {
+  const tile = e.target.closest('.receipt-tile');
+  if (tile) await openExistingReceipt(tile.dataset.id);
+});
+
+async function openExistingReceipt(receiptId) {
+  const { data: receipt, error: receiptErr } = await sb.from('receipts').select('*').eq('id', receiptId).single();
+  if (receiptErr || !receipt) return;
+
+  if (receipt.status === 'pending') {
+    const status = document.getElementById('receiptUploadStatus');
+    status.textContent = 'This receipt is still being read — try again in a moment, or scan it again.';
+    status.className = 'save-status';
+    return;
+  }
+
+  const { data: items } = await sb.from('receipt_items').select('*').eq('receipt_id', receiptId);
+
+  await openReceiptReview({
+    receiptId: receipt.id,
+    listId: receipt.list_id,
+    storeLabel: receipt.store_label,
+    receiptDate: receipt.receipt_date,
+    total: receipt.total,
+    items: (items ?? []).map((i) => ({ label: i.label, price: i.price, matchedId: i.matched_list_item_id })),
+    note:
+      receipt.status === 'failed'
+        ? 'This receipt failed to read automatically — add items manually below.'
+        : 'Editing a previously saved receipt.',
+  });
 }
 
 // ---------------------------------------------------------------------------
