@@ -78,6 +78,20 @@ create table list_items (
 );
 create index list_items_household_idx on list_items (household_id);
 
+-- Household-defined overrides for the built-in keyword -> (aisle group, icon)
+-- guesses in index.html's ITEM_GROUP_RULES (e.g. "margarine" isn't recognised
+-- as dairy by the built-in rules, so a household can add one here instead of
+-- waiting for a code change). Checked first, before the built-in JS rules.
+create table item_category_rules (
+  id uuid primary key default gen_random_uuid(),
+  household_id uuid not null references households(id) on delete cascade,
+  keyword text not null,   -- case-insensitive substring match against the item's label
+  category text not null,  -- must match one of index.html's ITEM_GROUP_ORDER entries
+  icon text not null,      -- a single emoji
+  created_at timestamptz not null default now()
+);
+create index item_category_rules_household_idx on item_category_rules (household_id);
+
 -- ============================================================
 -- Row level security — everything scoped to "my household"
 -- ============================================================
@@ -86,6 +100,7 @@ alter table households enable row level security;
 alter table profiles enable row level security;
 alter table household_stores enable row level security;
 alter table list_items enable row level security;
+alter table item_category_rules enable row level security;
 -- products / price_history are readable by anyone logged in (no household-specific data in them)
 alter table products enable row level security;
 alter table price_history enable row level security;
@@ -118,6 +133,10 @@ create policy "manage own household's stores" on household_stores
   with check (household_id = my_household_id());
 
 create policy "manage own household's list" on list_items
+  for all using (household_id = my_household_id())
+  with check (household_id = my_household_id());
+
+create policy "manage own household's category rules" on item_category_rules
   for all using (household_id = my_household_id())
   with check (household_id = my_household_id());
 
