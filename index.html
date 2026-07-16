@@ -174,18 +174,9 @@
   .bar-track{ height:8px; background:var(--panel-2); border-radius:4px; overflow:hidden; }
   .bar-fill{ height:100%; background:var(--accent); border-radius:4px; }
   .bar-row-value{ flex:none; font-family:var(--mono); font-size:12px; color:var(--muted); text-align:right; }
-  .receipt-items-editor{ display:flex; flex-direction:column; gap:10px; margin:10px 0; }
-  .receipt-item-row{
-    display:grid; gap:6px; align-items:center; padding-bottom:8px;
-    border-bottom:1px solid var(--border);
-    grid-template-columns:1fr 80px auto;
-    grid-template-areas: "label price remove" "category category category";
-  }
-  .receipt-item-row:last-child{ border-bottom:none; padding-bottom:0; }
-  .receipt-item-label{ grid-area:label; }
-  .receipt-item-price{ grid-area:price; }
-  .receipt-item-remove{ grid-area:remove; }
-  .receipt-item-category{ grid-area:category; width:100%; }
+  .receipt-items-editor{ display:flex; flex-direction:column; gap:6px; margin:10px 0; }
+  .receipt-item-row{ display:grid; grid-template-columns:1.3fr 65px 1.4fr auto; gap:6px; align-items:center; }
+  .receipt-item-category{ font-size:11px; padding:10px 8px; }
   .receipt-total-row{ align-items:center; margin-top:10px; }
   .receipt-total-row input{ flex:0 0 110px; }
   .receipt-tile{
