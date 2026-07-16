@@ -178,6 +178,12 @@
   .receipt-item-row{ display:grid; grid-template-columns:1.6fr 38px 55px 1fr auto; gap:6px; align-items:center; }
   .receipt-item-row input, .receipt-item-row select{ font-size:11px; padding:9px 6px; }
   .receipt-item-qty{ text-align:center; padding-left:2px !important; padding-right:2px !important; }
+  .receipt-item-view{
+    font-size:11px; padding:9px 6px; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap; color:var(--text);
+  }
+  span.receipt-item-qty.receipt-item-view{ text-align:center; padding-left:2px; padding-right:2px; }
+  span.receipt-item-price.receipt-item-view{ text-align:right; font-family:var(--mono); }
   .receipt-total-row{ align-items:center; margin-top:10px; }
   .receipt-total-row input{ flex:0 0 110px; }
   .receipt-tile{
@@ -1625,15 +1631,29 @@ async function openReceiptReview({ receiptId, storeLabel, receiptDate, total, it
   document.getElementById('receiptReviewCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function receiptItemRowHtml(label, qty, price, categoryId) {
+// AI-extracted rows show item/qty/cost as plain read-only text - no need to
+// tap into them, and it keeps the row scannable at a glance. If one's wrong,
+// delete the row and add a corrected one via "+ Add item", which IS editable
+// (editable=true) since that's the manual-entry path.
+function receiptItemRowHtml(label, qty, price, categoryId, editable = false) {
   const options = categories
     .map((c) => `<option value="${c.id}" ${c.id === categoryId ? 'selected' : ''}>${c.icon} ${escapeAttr(c.name)}</option>`)
     .join('');
+  const priceDisplay = price === '' || price == null ? '' : Number(price).toFixed(2);
+  const labelField = editable
+    ? `<input class="receipt-item-label" value="${escapeAttr(label)}" placeholder="Item" />`
+    : `<span class="receipt-item-label receipt-item-view">${escapeAttr(label)}</span>`;
+  const qtyField = editable
+    ? `<input class="receipt-item-qty" type="number" step="1" min="1" value="${qty ?? 1}" placeholder="1" title="Quantity" />`
+    : `<span class="receipt-item-qty receipt-item-view" title="Quantity">${qty ?? 1}</span>`;
+  const priceField = editable
+    ? `<input class="receipt-item-price" type="number" step="0.01" value="${price ?? ''}" placeholder="0.00" title="Line total" />`
+    : `<span class="receipt-item-price receipt-item-view" title="Line total">${priceDisplay}</span>`;
   return `
     <div class="receipt-item-row">
-      <input class="receipt-item-label" value="${escapeAttr(label)}" placeholder="Item" />
-      <input class="receipt-item-qty" type="number" step="1" min="1" value="${qty ?? 1}" placeholder="1" title="Quantity" />
-      <input class="receipt-item-price" type="number" step="0.01" value="${price ?? ''}" placeholder="0.00" title="Line total" />
+      ${labelField}
+      ${qtyField}
+      ${priceField}
       <select class="receipt-item-category">${options}</select>
       <button type="button" class="ghost small receipt-item-remove" aria-label="Remove item">✕</button>
     </div>
@@ -1642,14 +1662,24 @@ function receiptItemRowHtml(label, qty, price, categoryId) {
 
 function renderReceiptItemsEditor(items) {
   document.getElementById('receiptItemsEditor').innerHTML = items
-    .map((i) => receiptItemRowHtml(i.label, i.qty, i.price, i.categoryId))
+    .map((i) => receiptItemRowHtml(i.label, i.qty, i.price, i.categoryId, false))
     .join('');
 }
 
 document.getElementById('addReceiptItemBtn').onclick = () => {
   const otherId = categories.find((c) => c.name === 'Other')?.id ?? '';
-  document.getElementById('receiptItemsEditor').insertAdjacentHTML('beforeend', receiptItemRowHtml('', 1, '', otherId));
+  document
+    .getElementById('receiptItemsEditor')
+    .insertAdjacentHTML('beforeend', receiptItemRowHtml('', 1, '', otherId, true));
 };
+
+// Reads a row's field regardless of whether it's a locked <span> (AI-extracted
+// rows) or an editable <input> (manually added rows).
+function receiptFieldValue(row, className) {
+  const el = row.querySelector('.' + className);
+  if (!el) return '';
+  return (el.tagName === 'INPUT' ? el.value : el.textContent).trim();
+}
 
 document.addEventListener('click', (e) => {
   const removeBtn = e.target.closest('.receipt-item-remove');
@@ -1668,9 +1698,9 @@ document.getElementById('saveReceiptBtn').onclick = async () => {
 
   const rows = [...document.querySelectorAll('#receiptItemsEditor .receipt-item-row')]
     .map((row) => ({
-      label: row.querySelector('.receipt-item-label').value.trim(),
-      qty: parseInt(row.querySelector('.receipt-item-qty').value, 10) || 1,
-      price: parseFloat(row.querySelector('.receipt-item-price').value),
+      label: receiptFieldValue(row, 'receipt-item-label'),
+      qty: parseInt(receiptFieldValue(row, 'receipt-item-qty'), 10) || 1,
+      price: parseFloat(receiptFieldValue(row, 'receipt-item-price')),
       categoryId: row.querySelector('.receipt-item-category').value,
     }))
     .filter((r) => r.label && !Number.isNaN(r.price) && r.categoryId);
