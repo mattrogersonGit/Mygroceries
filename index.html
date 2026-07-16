@@ -155,11 +155,6 @@
   .analytics-row-count{ flex:none; font-family:var(--mono); font-size:13px; color:var(--accent); font-weight:600; text-align:right; }
   .receipt-items-editor{ display:flex; flex-direction:column; gap:6px; margin:10px 0; }
   .receipt-item-row{ display:grid; grid-template-columns:2.2fr 80px 1fr auto; gap:6px; align-items:center; }
-  .receipt-item-row select{ font-size:12px; }
-  .receipt-item-new-category-row{ display:none; grid-column:1 / -1; gap:6px; margin-top:-2px; }
-  .receipt-item-new-category-row.visible{ display:flex; }
-  .receipt-item-new-category-row input{ flex:1; font-size:12px; }
-  .receipt-item-new-category-row input.receipt-item-new-icon{ flex:0 0 50px; text-align:center; }
   .receipt-total-row{ align-items:center; margin-top:10px; }
   .receipt-total-row input{ flex:0 0 110px; }
   .receipt-tile{
@@ -406,11 +401,11 @@
         <div id="categoryRulesList"></div>
         <form id="addRuleForm" class="rule-form">
           <input id="ruleKeyword" placeholder="Word to match, e.g. margarine" />
-          <select id="ruleCategory"></select>
-          <input id="ruleNewCategory" placeholder="New category name" class="hidden" />
+          <input id="ruleCategory" list="categoryDatalist" placeholder="Category, e.g. Dairy & Eggs" />
           <input id="ruleIcon" placeholder="🧈" maxlength="4" class="rule-icon-input" />
           <button type="submit" class="small">Add rule</button>
         </form>
+        <datalist id="categoryDatalist"></datalist>
         <span id="ruleStatus" class="save-status"></span>
       </section>
 
@@ -1477,12 +1472,8 @@ function receiptItemRowHtml(label, price, category) {
     <div class="receipt-item-row">
       <input class="receipt-item-label" value="${escapeAttr(label)}" placeholder="Item" />
       <input class="receipt-item-price" type="number" step="0.01" value="${price ?? ''}" placeholder="0.00" />
-      <select class="receipt-item-category">${categoryOptionsHtml(category)}</select>
+      <input class="receipt-item-category" list="categoryDatalist" value="${escapeAttr(category)}" placeholder="Category" />
       <button type="button" class="ghost small receipt-item-remove" aria-label="Remove item">✕</button>
-      <div class="receipt-item-new-category-row">
-        <input class="receipt-item-new-category" placeholder="New category name" />
-        <input class="receipt-item-new-icon" placeholder="🛒" maxlength="4" />
-      </div>
     </div>
   `;
 }
@@ -1502,12 +1493,6 @@ document.addEventListener('click', (e) => {
   if (removeBtn) removeBtn.closest('.receipt-item-row').remove();
 });
 
-document.addEventListener('change', (e) => {
-  if (!e.target.classList.contains('receipt-item-category')) return;
-  const subRow = e.target.closest('.receipt-item-row').querySelector('.receipt-item-new-category-row');
-  subRow.classList.toggle('visible', e.target.value === '__new__');
-});
-
 document.getElementById('cancelReceiptBtn').onclick = () => {
   document.getElementById('receiptReviewCard').classList.add('hidden');
   editingReceiptId = null;
@@ -1519,16 +1504,11 @@ document.getElementById('saveReceiptBtn').onclick = async () => {
   if (!editingReceiptId) return;
 
   const rows = [...document.querySelectorAll('#receiptItemsEditor .receipt-item-row')]
-    .map((row) => {
-      const selectValue = row.querySelector('.receipt-item-category').value;
-      const isNew = selectValue === '__new__';
-      return {
-        label: row.querySelector('.receipt-item-label').value.trim(),
-        price: parseFloat(row.querySelector('.receipt-item-price').value),
-        category: isNew ? row.querySelector('.receipt-item-new-category').value.trim() : selectValue,
-        icon: isNew ? row.querySelector('.receipt-item-new-icon').value.trim() || '🛒' : null,
-      };
-    })
+    .map((row) => ({
+      label: row.querySelector('.receipt-item-label').value.trim(),
+      price: parseFloat(row.querySelector('.receipt-item-price').value),
+      category: row.querySelector('.receipt-item-category').value.trim(),
+    }))
     .filter((r) => r.label && !Number.isNaN(r.price) && r.category);
 
   if (rows.length === 0) {
@@ -1576,7 +1556,7 @@ document.getElementById('saveReceiptBtn').onclick = async () => {
     for (const r of rows) {
       const current = classifyItem(r.label);
       if (current.group === r.category) continue;
-      const icon = r.icon ?? iconForCategory(r.category);
+      const icon = iconForCategory(r.category);
       const existingRule = customCategoryRules.find((rule) => rule.keyword.toLowerCase() === r.label.toLowerCase());
       if (existingRule) {
         await sb.from('item_category_rules').update({ category: r.category, icon }).eq('id', existingRule.id);
@@ -1699,28 +1679,17 @@ async function loadSettings() {
   await loadCategoryRules();
 }
 
-// Shared by the Settings rule form and the receipt review row: every known
-// category (built-in + household-introduced), "Other" as the catch-all, and
-// a "+ Add new category" option that reveals a free-text name field.
-function categoryOptionsHtml(selected) {
-  const options = [...knownCategories(), 'Other']
-    .map((g) => `<option value="${escapeAttr(g)}" ${g === selected ? 'selected' : ''}>${g}</option>`)
+// Shared by the Settings rule form and the receipt review row (both use
+// <input list="categoryDatalist">): typing an existing category's name
+// reuses it, typing anything else creates a new one - no separate "add new
+// category" mode to find. Rebuilt whenever customCategoryRules reloads so a
+// category introduced from the receipt review screen shows up as a
+// suggestion in Settings too, and vice versa.
+function renderCategoryDatalist() {
+  document.getElementById('categoryDatalist').innerHTML = [...knownCategories(), 'Other']
+    .map((g) => `<option value="${escapeAttr(g)}"></option>`)
     .join('');
-  return `${options}<option value="__new__" ${selected === '__new__' ? 'selected' : ''}>+ Add new category…</option>`;
 }
-
-// Rebuilt every time customCategoryRules reloads (not just once) so a
-// category introduced from the receipt review screen shows up here too.
-function renderRuleCategorySelect() {
-  const select = document.getElementById('ruleCategory');
-  const previousValue = select.value;
-  select.innerHTML = categoryOptionsHtml(null);
-  if ([...select.options].some((o) => o.value === previousValue)) select.value = previousValue;
-}
-
-document.getElementById('ruleCategory').onchange = (e) => {
-  document.getElementById('ruleNewCategory').classList.toggle('hidden', e.target.value !== '__new__');
-};
 
 async function loadCategoryRules() {
   const { data } = await sb
@@ -1735,7 +1704,7 @@ async function loadCategoryRules() {
 }
 
 function renderCategoryRules() {
-  renderRuleCategorySelect();
+  renderCategoryDatalist();
   const list = document.getElementById('categoryRulesList');
   if (customCategoryRules.length === 0) {
     list.innerHTML = '<p class="no-rules-note">No custom rules yet - items you haven\'t taught it about show a shopping trolley icon under "Other".</p>';
@@ -1765,11 +1734,10 @@ document.getElementById('addRuleForm').onsubmit = async (e) => {
   e.preventDefault();
   const status = document.getElementById('ruleStatus');
   const keyword = document.getElementById('ruleKeyword').value.trim();
-  const selectValue = document.getElementById('ruleCategory').value;
-  const category = selectValue === '__new__' ? document.getElementById('ruleNewCategory').value.trim() : selectValue;
+  const category = document.getElementById('ruleCategory').value.trim();
   const icon = document.getElementById('ruleIcon').value.trim() || '🛒';
   if (!keyword) { status.textContent = 'Enter a word to match first.'; status.className = 'save-status error'; return; }
-  if (!category) { status.textContent = 'Enter a name for the new category.'; status.className = 'save-status error'; return; }
+  if (!category) { status.textContent = 'Enter a category.'; status.className = 'save-status error'; return; }
 
   const { error } = await sb.from('item_category_rules').insert({
     household_id: profile.household_id,
@@ -1784,9 +1752,8 @@ document.getElementById('addRuleForm').onsubmit = async (e) => {
   }
   status.textContent = '';
   document.getElementById('ruleKeyword').value = '';
+  document.getElementById('ruleCategory').value = '';
   document.getElementById('ruleIcon').value = '';
-  document.getElementById('ruleNewCategory').value = '';
-  document.getElementById('ruleNewCategory').classList.add('hidden');
   await loadCategoryRules();
 };
 
