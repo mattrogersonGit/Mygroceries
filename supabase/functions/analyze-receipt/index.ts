@@ -1,13 +1,15 @@
-// Reads a receipt photo that the client already uploaded to the `receipts`
-// Storage bucket, asks OpenAI to extract store/date/total/items, and returns
-// that as a *draft* - the client always shows a review/edit screen before
-// anything is written to receipt_items. Never write straight from here into
-// receipt_items: OCR misreads (blurry photos, multi-buy lines, truncated
-// names) are expected, not exceptional.
+// Reads a receipt photo or PDF that the client already uploaded to the
+// `receipts` Storage bucket, asks OpenAI to extract store/date/total/items,
+// and returns that as a *draft* - the client always shows a review/edit
+// screen before anything is written to receipt_items. Never write straight
+// from here into receipt_items: OCR misreads (blurry photos, multi-buy
+// lines, truncated names) are expected, not exceptional.
 //
-// Photos only for now (JPEG/PNG/WEBP/GIF) - PDF support was dropped when
-// switching from Claude to OpenAI, since the current shape of OpenAI's PDF
-// input wasn't confirmed against live docs. Add it back once that's checked.
+// PDF support confirmed against OpenAI's live docs (developers.openai.com/
+// api/docs/guides/pdf-files) on 2026-07-16: Chat Completions accepts a
+// `{type: "file", file: {filename, file_data: "data:application/pdf;base64,..."}}`
+// content block, requires a vision-capable model (gpt-4o and later, which
+// covers gpt-4o-mini), and caps each file at 50MB.
 import OpenAI from "npm:openai";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
@@ -31,12 +33,15 @@ async function markFailed(
     .eq("id", receiptId);
 }
 
-function mediaTypeForExt(ext: string): string | null {
-  if (ext === "png") return "image/png";
-  if (ext === "webp") return "image/webp";
-  if (ext === "gif") return "image/gif";
-  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
-  return null; // pdf or anything else - not supported yet
+type FileKind = { kind: "image"; mediaType: string } | { kind: "pdf" };
+
+function fileKindForExt(ext: string): FileKind | null {
+  if (ext === "pdf") return { kind: "pdf" };
+  if (ext === "png") return { kind: "image", mediaType: "image/png" };
+  if (ext === "webp") return { kind: "image", mediaType: "image/webp" };
+  if (ext === "gif") return { kind: "image", mediaType: "image/gif" };
+  if (ext === "jpg" || ext === "jpeg") return { kind: "image", mediaType: "image/jpeg" };
+  return null; // unrecognised extension
 }
 
 // OpenAI's structured-outputs "strict" mode requires every property to be
@@ -109,10 +114,10 @@ Deno.serve(async (req) => {
     }
 
     const ext = (receipt.image_path as string).split(".").pop()?.toLowerCase() ?? "";
-    const mediaType = mediaTypeForExt(ext);
-    if (!mediaType) {
-      await markFailed(supabase, receiptId, "Unsupported file type - photos only (no PDF) with this setup");
-      return jsonResponse({ error: "PDF receipts aren't supported yet - please upload a photo instead" }, 400);
+    const fileKind = fileKindForExt(ext);
+    if (!fileKind) {
+      await markFailed(supabase, receiptId, `Unsupported file type: .${ext}`);
+      return jsonResponse({ error: `Unsupported file type: .${ext} - upload a photo or PDF` }, 400);
     }
 
     const { data: fileBlob, error: downloadErr } = await supabase.storage
@@ -128,6 +133,13 @@ Deno.serve(async (req) => {
 
     const openai = new OpenAI({ apiKey: Deno.env.get("OPENAI_API_KEY") });
 
+    const fileContentBlock = fileKind.kind === "pdf"
+      ? {
+          type: "file" as const,
+          file: { filename: `receipt.pdf`, file_data: `data:application/pdf;base64,${base64}` },
+        }
+      : { type: "image_url" as const, image_url: { url: `data:${fileKind.mediaType};base64,${base64}` } };
+
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       max_tokens: 4096,
@@ -138,12 +150,12 @@ Deno.serve(async (req) => {
             {
               type: "text",
               text:
-                "This is a photo of a grocery store receipt. Extract the store name, the receipt date, the total " +
-                "amount paid, and every purchased line item with its price in dollars (not cents). Skip subtotal, " +
-                "tax, tender, change, and loyalty-points lines - only include actual purchased items. If a field " +
-                "isn't legible or present, use null rather than guessing.",
+                "This is a photo or PDF of a grocery store receipt. Extract the store name, the receipt date, the " +
+                "total amount paid, and every purchased line item with its price in dollars (not cents). Skip " +
+                "subtotal, tax, tender, change, and loyalty-points lines - only include actual purchased items. " +
+                "If a field isn't legible or present, use null rather than guessing.",
             },
-            { type: "image_url", image_url: { url: `data:${mediaType};base64,${base64}` } },
+            fileContentBlock,
           ],
         },
       ],

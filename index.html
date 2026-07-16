@@ -321,8 +321,8 @@
     <div class="page" id="page-analytics">
       <section class="card">
         <h2>Scan a receipt</h2>
-        <p class="muted">Photograph or upload a receipt photo and AI will read off the store, date, and items for you to check before saving. Nothing is saved until you review and confirm it. PDFs aren't supported yet — photos only.</p>
-        <input type="file" id="receiptFileInput" accept="image/*" capture="environment" class="hidden" />
+        <p class="muted">Photograph or upload a receipt (photo or PDF) and AI will read off the store, date, and items for you to check before saving. Nothing is saved until you review and confirm it.</p>
+        <input type="file" id="receiptFileInput" accept="image/*,.pdf" capture="environment" class="hidden" />
         <button type="button" id="scanReceiptBtn" class="small">Scan a receipt</button>
         <span id="receiptUploadStatus" class="save-status"></span>
       </section>
