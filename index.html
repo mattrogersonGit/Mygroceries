@@ -321,8 +321,8 @@
     <div class="page" id="page-analytics">
       <section class="card">
         <h2>Scan a receipt</h2>
-        <p class="muted">Photograph or upload a receipt and Claude will read off the store, date, and items for you to check before saving. Nothing is saved until you review and confirm it.</p>
-        <input type="file" id="receiptFileInput" accept="image/*,.pdf" capture="environment" class="hidden" />
+        <p class="muted">Photograph or upload a receipt photo and AI will read off the store, date, and items for you to check before saving. Nothing is saved until you review and confirm it. PDFs aren't supported yet — photos only.</p>
+        <input type="file" id="receiptFileInput" accept="image/*" capture="environment" class="hidden" />
         <button type="button" id="scanReceiptBtn" class="small">Scan a receipt</button>
         <span id="receiptUploadStatus" class="save-status"></span>
       </section>
@@ -1363,7 +1363,7 @@ function renderAnalytics(rows) {
 }
 
 // ---------------------------------------------------------------------------
-// Receipt scanning — photo/PDF -> Claude draft -> user review -> save.
+// Receipt scanning — photo -> AI draft -> user review -> save.
 // Nothing from the AI draft ever reaches receipt_items directly; the review
 // screen's edited values are always what gets written on save.
 // ---------------------------------------------------------------------------
@@ -1427,7 +1427,7 @@ async function handleReceiptFileSelected(file) {
       receiptDate: fnData.draft.receipt_date ?? '',
       total: fnData.draft.total ?? '',
       items: fnData.draft.items ?? [],
-      note: "Check every field below — Claude's reading can miss or misread items, especially on blurry photos.",
+      note: "Check every field below — the AI's reading can miss or misread items, especially on blurry photos.",
     });
   } catch (err) {
     status.textContent = `Couldn't read that receipt: ${err.message}`;

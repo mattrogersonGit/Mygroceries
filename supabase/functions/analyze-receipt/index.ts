@@ -1,10 +1,14 @@
-// Reads a receipt photo/PDF that the client already uploaded to the
-// `receipts` Storage bucket, asks Claude to extract store/date/total/items,
-// and returns that as a *draft* - the client always shows a review/edit
-// screen before anything is written to receipt_items. Never write straight
-// from here into receipt_items: OCR misreads (blurry photos, multi-buy
-// lines, truncated names) are expected, not exceptional.
-import Anthropic from "npm:@anthropic-ai/sdk";
+// Reads a receipt photo that the client already uploaded to the `receipts`
+// Storage bucket, asks OpenAI to extract store/date/total/items, and returns
+// that as a *draft* - the client always shows a review/edit screen before
+// anything is written to receipt_items. Never write straight from here into
+// receipt_items: OCR misreads (blurry photos, multi-buy lines, truncated
+// names) are expected, not exceptional.
+//
+// Photos only for now (JPEG/PNG/WEBP/GIF) - PDF support was dropped when
+// switching from Claude to OpenAI, since the current shape of OpenAI's PDF
+// input wasn't confirmed against live docs. Add it back once that's checked.
+import OpenAI from "npm:openai";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 import { corsHeaders } from "../_shared/cors.ts";
@@ -27,13 +31,48 @@ async function markFailed(
     .eq("id", receiptId);
 }
 
-function mediaTypeForExt(ext: string): { isPdf: boolean; mediaType: string } {
-  if (ext === "pdf") return { isPdf: true, mediaType: "application/pdf" };
-  if (ext === "png") return { isPdf: false, mediaType: "image/png" };
-  if (ext === "webp") return { isPdf: false, mediaType: "image/webp" };
-  if (ext === "gif") return { isPdf: false, mediaType: "image/gif" };
-  return { isPdf: false, mediaType: "image/jpeg" }; // jpg/jpeg and any other fallback
+function mediaTypeForExt(ext: string): string | null {
+  if (ext === "png") return "image/png";
+  if (ext === "webp") return "image/webp";
+  if (ext === "gif") return "image/gif";
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  return null; // pdf or anything else - not supported yet
 }
+
+// OpenAI's structured-outputs "strict" mode requires every property to be
+// listed in `required`; a field is made optional/nullable by including
+// "null" in its own `type` array instead of omitting it from `required`.
+const RECEIPT_SCHEMA = {
+  type: "object",
+  properties: {
+    store_label: {
+      type: ["string", "null"],
+      description: "Store/retailer name as printed on the receipt",
+    },
+    receipt_date: {
+      type: ["string", "null"],
+      description: "Receipt date in ISO 8601 (YYYY-MM-DD)",
+    },
+    total: {
+      type: ["number", "null"],
+      description: "Total amount paid, in dollars",
+    },
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          label: { type: "string" },
+          price: { type: "number", description: "Price in dollars, not cents" },
+        },
+        required: ["label", "price"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["store_label", "receipt_date", "total", "items"],
+  additionalProperties: false,
+};
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -69,6 +108,13 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "Receipt not found" }, 404);
     }
 
+    const ext = (receipt.image_path as string).split(".").pop()?.toLowerCase() ?? "";
+    const mediaType = mediaTypeForExt(ext);
+    if (!mediaType) {
+      await markFailed(supabase, receiptId, "Unsupported file type - photos only (no PDF) with this setup");
+      return jsonResponse({ error: "PDF receipts aren't supported yet - please upload a photo instead" }, 400);
+    }
+
     const { data: fileBlob, error: downloadErr } = await supabase.storage
       .from("receipts")
       .download(receipt.image_path as string);
@@ -79,96 +125,52 @@ Deno.serve(async (req) => {
 
     const bytes = new Uint8Array(await fileBlob.arrayBuffer());
     const base64 = encodeBase64(bytes);
-    const ext = (receipt.image_path as string).split(".").pop()?.toLowerCase() ?? "";
-    const { isPdf, mediaType } = mediaTypeForExt(ext);
 
-    const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
+    const openai = new OpenAI({ apiKey: Deno.env.get("OPENAI_API_KEY") });
 
-    const contentBlock = isPdf
-      ? {
-          type: "document" as const,
-          source: { type: "base64" as const, media_type: "application/pdf" as const, data: base64 },
-        }
-      : {
-          type: "image" as const,
-          // deno-lint-ignore no-explicit-any
-          source: { type: "base64" as const, media_type: mediaType as any, data: base64 },
-        };
-
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-5",
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
       max_tokens: 4096,
-      thinking: { type: "adaptive" },
-      output_config: {
-        format: {
-          type: "json_schema",
-          schema: {
-            type: "object",
-            properties: {
-              store_label: {
-                anyOf: [{ type: "string" }, { type: "null" }],
-                description: "Store/retailer name as printed on the receipt",
-              },
-              receipt_date: {
-                anyOf: [{ type: "string" }, { type: "null" }],
-                description: "Receipt date in ISO 8601 (YYYY-MM-DD)",
-              },
-              total: {
-                anyOf: [{ type: "number" }, { type: "null" }],
-                description: "Total amount paid, in dollars",
-              },
-              items: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    label: { type: "string" },
-                    price: { type: "number", description: "Price in dollars, not cents" },
-                  },
-                  required: ["label", "price"],
-                  additionalProperties: false,
-                },
-              },
-            },
-            required: ["items"],
-            additionalProperties: false,
-          },
-        },
-      },
       messages: [
         {
           role: "user",
           content: [
-            contentBlock,
             {
               type: "text",
               text:
-                "This is a photo or PDF of a grocery store receipt. Extract the store name, the receipt date, " +
-                "the total amount paid, and every purchased line item with its price in dollars (not cents). " +
-                "Skip subtotal, tax, tender, change, and loyalty-points lines - only include actual purchased " +
-                "items. If a field isn't legible or present, use null rather than guessing.",
+                "This is a photo of a grocery store receipt. Extract the store name, the receipt date, the total " +
+                "amount paid, and every purchased line item with its price in dollars (not cents). Skip subtotal, " +
+                "tax, tender, change, and loyalty-points lines - only include actual purchased items. If a field " +
+                "isn't legible or present, use null rather than guessing.",
             },
+            { type: "image_url", image_url: { url: `data:${mediaType};base64,${base64}` } },
           ],
         },
       ],
+      response_format: {
+        type: "json_schema",
+        json_schema: { name: "receipt_extraction", strict: true, schema: RECEIPT_SCHEMA },
+      },
     });
 
-    if (response.stop_reason === "refusal") {
-      await markFailed(supabase, receiptId, "Claude declined to analyze this receipt");
-      return jsonResponse({ error: "Claude declined to analyze this receipt" }, 422);
-    }
-    if (response.stop_reason === "max_tokens") {
+    const choice = completion.choices[0];
+
+    if (choice?.finish_reason === "length") {
       await markFailed(supabase, receiptId, "Response was truncated - too many items on the receipt");
       return jsonResponse({ error: "Response was truncated (receipt may have too many items)" }, 500);
     }
-
-    const textBlock = response.content.find((b) => b.type === "text");
-    if (!textBlock || textBlock.type !== "text") {
-      await markFailed(supabase, receiptId, "No text content in Claude's response");
-      return jsonResponse({ error: "No text content in Claude's response" }, 500);
+    if (choice?.message?.refusal) {
+      await markFailed(supabase, receiptId, choice.message.refusal);
+      return jsonResponse({ error: "OpenAI declined to analyze this receipt" }, 422);
     }
 
-    const draft = JSON.parse(textBlock.text);
+    const content = choice?.message?.content;
+    if (!content) {
+      await markFailed(supabase, receiptId, "No content in OpenAI's response");
+      return jsonResponse({ error: "No content in OpenAI's response" }, 500);
+    }
+
+    const draft = JSON.parse(content);
 
     // Persist the draft + raw response now so status moves off "pending" even
     // if the user never finishes reviewing - "Recent receipts" can still show
@@ -181,7 +183,7 @@ Deno.serve(async (req) => {
         chain: draft.store_label ?? null,
         receipt_date: draft.receipt_date ?? null,
         total: draft.total ?? null,
-        raw_ai_response: response,
+        raw_ai_response: completion,
       })
       .eq("id", receiptId);
 

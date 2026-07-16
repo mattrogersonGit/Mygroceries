@@ -3,3 +3,4 @@
 .env
 scraper/node_modules/
 scraper/debug/
+supabase/.temp/
