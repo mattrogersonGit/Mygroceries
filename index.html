@@ -138,6 +138,7 @@
   .rule-group-count{ color:var(--muted); font-weight:400; font-size:12px; }
   .rule-form{ display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
   .rule-form input, .rule-form select{ flex:1; min-width:110px; }
+  .rule-form-hint{ margin-top:6px; }
   .rule-icon-input{ flex:0 0 60px !important; text-align:center; }
   .no-rules-note{ color:var(--muted); font-size:12px; font-style:italic; padding:4px 0; }
   #createListForm{ display:flex; flex-direction:column; gap:8px; }
@@ -410,10 +411,11 @@
         <div id="categoryRulesList"></div>
         <form id="addRuleForm" class="rule-form">
           <input id="ruleKeyword" placeholder="Word to match, e.g. margarine" />
-          <input id="ruleCategory" list="categoryDatalist" placeholder="Category, e.g. Dairy & Eggs" />
+          <input id="ruleCategory" list="categoryDatalist" placeholder="Category - existing or new" />
           <input id="ruleIcon" placeholder="🧈" maxlength="4" class="rule-icon-input" />
           <button type="submit" class="small">Add rule</button>
         </form>
+        <p class="muted rule-form-hint">Category can be one you already have, or type a brand new name (e.g. "Alcohol") to create it.</p>
         <datalist id="categoryDatalist"></datalist>
         <span id="ruleStatus" class="save-status"></span>
       </section>
