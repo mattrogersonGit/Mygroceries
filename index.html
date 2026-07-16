@@ -196,6 +196,7 @@
   .receipt-tile-meta{ font-size:11px; color:var(--muted); margin-top:1px; }
   .receipt-tile-total{ flex:none; font-family:var(--mono); font-size:13px; font-weight:600; text-align:right; }
   .receipt-tile.status-failed .receipt-tile-store::after{ content:' (failed)'; color:var(--danger,#c0392b); font-weight:400; }
+  .receipt-tile-delete{ flex:none; background:transparent; color:var(--muted); border:none; font-size:15px; padding:2px 4px; cursor:pointer; }
   #addItemForm{ display:flex; gap:8px; margin-bottom:14px; }
   .item-group-heading{
     font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:600;
@@ -1805,6 +1806,7 @@ function renderRecentReceipts(rows) {
             <div class="receipt-tile-meta">${dateLabel} · ${count} item${count === 1 ? '' : 's'}</div>
           </div>
           <div class="receipt-tile-total">${totalLabel}</div>
+          <button type="button" class="receipt-tile-delete" data-id="${r.id}" aria-label="Delete receipt">✕</button>
         </div>
       `;
     })
@@ -1812,6 +1814,15 @@ function renderRecentReceipts(rows) {
 }
 
 document.addEventListener('click', async (e) => {
+  const deleteBtn = e.target.closest('.receipt-tile-delete');
+  if (deleteBtn) {
+    e.stopPropagation();
+    if (!confirm('Delete this receipt and its items? This can\'t be undone.')) return;
+    await sb.from('receipts').delete().eq('id', deleteBtn.dataset.id);
+    await loadRecentReceipts();
+    await loadSpendingAnalytics();
+    return;
+  }
   const tile = e.target.closest('.receipt-tile');
   if (tile) await openExistingReceipt(tile.dataset.id);
 });
