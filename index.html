@@ -165,8 +165,27 @@
   .analytics-row-label{ font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .analytics-row-dates{ font-size:11px; color:var(--muted); margin-top:1px; }
   .analytics-row-count{ flex:none; font-family:var(--mono); font-size:13px; color:var(--accent); font-weight:600; text-align:right; }
-  .receipt-items-editor{ display:flex; flex-direction:column; gap:6px; margin:10px 0; }
-  .receipt-item-row{ display:grid; grid-template-columns:2.2fr 80px 1fr auto; gap:6px; align-items:center; }
+  .stat-tiles{ display:flex; gap:10px; margin-bottom:6px; }
+  .stat-tile{ flex:1; background:var(--panel-2); border:1px solid var(--border); border-radius:10px; padding:12px; text-align:center; }
+  .stat-tile-value{ font-size:20px; font-weight:700; font-family:var(--mono); }
+  .stat-tile-label{ font-size:11px; color:var(--muted); margin-top:2px; }
+  .bar-row{ display:grid; grid-template-columns:1fr 2fr auto; gap:10px; align-items:center; padding:6px 0; font-size:13px; }
+  .bar-row-label{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .bar-track{ height:8px; background:var(--panel-2); border-radius:4px; overflow:hidden; }
+  .bar-fill{ height:100%; background:var(--accent); border-radius:4px; }
+  .bar-row-value{ flex:none; font-family:var(--mono); font-size:12px; color:var(--muted); text-align:right; }
+  .receipt-items-editor{ display:flex; flex-direction:column; gap:10px; margin:10px 0; }
+  .receipt-item-row{
+    display:grid; gap:6px; align-items:center; padding-bottom:8px;
+    border-bottom:1px solid var(--border);
+    grid-template-columns:1fr 80px auto;
+    grid-template-areas: "label price remove" "category category category";
+  }
+  .receipt-item-row:last-child{ border-bottom:none; padding-bottom:0; }
+  .receipt-item-label{ grid-area:label; }
+  .receipt-item-price{ grid-area:price; }
+  .receipt-item-remove{ grid-area:remove; }
+  .receipt-item-category{ grid-area:category; width:100%; }
   .receipt-total-row{ align-items:center; margin-top:10px; }
   .receipt-total-row input{ flex:0 0 110px; }
   .receipt-tile{
@@ -357,16 +376,40 @@
       </section>
 
       <section class="card">
+        <h2>Actual spending</h2>
+        <p class="muted">From your scanned receipts — real amounts paid, not what's on a list.</p>
+        <div class="stat-tiles">
+          <div class="stat-tile">
+            <div class="stat-tile-value" id="totalSpendStat">—</div>
+            <div class="stat-tile-label">Total spent</div>
+          </div>
+          <div class="stat-tile">
+            <div class="stat-tile-value" id="receiptItemCountStat">0</div>
+            <div class="stat-tile-label">Items recorded</div>
+          </div>
+        </div>
+        <p class="empty hidden" id="spendingEmptyState">Scan a receipt above to start seeing spending here.</p>
+        <div id="spendingBreakdown">
+          <h3 class="my-stores-heading">Spend by category</h3>
+          <div id="spendByCategoryList"></div>
+          <h3 class="my-stores-heading">Most bought items</h3>
+          <div id="frequentItemsList"></div>
+          <h3 class="my-stores-heading">Top items by spend</h3>
+          <div id="spendByItemList"></div>
+        </div>
+      </section>
+
+      <section class="card">
         <h2>Recent receipts</h2>
         <div id="recentReceiptsList"></div>
         <p class="empty hidden" id="recentReceiptsEmptyState">No receipts scanned yet.</p>
       </section>
 
       <section class="card">
-        <h2>Purchase frequency</h2>
-        <p class="muted">Based on items in lists you've marked complete — how often each item actually gets bought.</p>
+        <h2>Shopping habits</h2>
+        <p class="muted">How often each item gets added to a list, whether or not it ends up bought or scanned - an intent signal, not proof of purchase (see Actual spending above for that).</p>
         <div id="analyticsList"></div>
-        <p class="empty hidden" id="analyticsEmptyState">Mark a list complete to start seeing analytics here.</p>
+        <p class="empty hidden" id="analyticsEmptyState">Add items to a list to start seeing this.</p>
       </section>
     </div>
 
@@ -565,6 +608,7 @@ async function onSignedIn(s) {
   await loadItems();
   await loadSettings();
   await loadAnalytics();
+  await loadSpendingAnalytics();
   await loadRecentReceipts();
 }
 
@@ -1345,26 +1389,109 @@ function renderPrices() {
 }
 
 // ---------------------------------------------------------------------------
-// Analytics - how often items actually get bought (from completed lists only,
-// not lists still in progress - see plan doc rationale)
+// Actual spending - from scanned receipts, real amounts paid. This is the
+// ground-truth analytics; Shopping habits below is a separate, weaker
+// intent signal from list additions and is never merged with these numbers.
+// ---------------------------------------------------------------------------
+async function loadSpendingAnalytics() {
+  const { data } = await sb.from('receipt_items').select('label, price').eq('household_id', profile.household_id);
+  renderSpendingAnalytics(data ?? []);
+}
+
+function renderSpendingAnalytics(items) {
+  document.getElementById('spendingEmptyState').classList.toggle('hidden', items.length > 0);
+  document.getElementById('spendingBreakdown').classList.toggle('hidden', items.length === 0);
+
+  const totalSpend = items.reduce((sum, i) => sum + Number(i.price), 0);
+  document.getElementById('totalSpendStat').textContent = items.length > 0 ? `$${totalSpend.toFixed(2)}` : '—';
+  document.getElementById('receiptItemCountStat').textContent = String(items.length);
+
+  // $ by category - classifyItem() is the same live categorisation used
+  // everywhere else, so this always reflects your current category rules,
+  // not whatever they were when a given receipt was scanned.
+  const byCategory = {};
+  items.forEach((i) => {
+    const { group, icon } = classifyItem(i.label);
+    byCategory[group] ??= { icon, total: 0 };
+    byCategory[group].total += Number(i.price);
+  });
+  const categoryRows = Object.entries(byCategory)
+    .map(([name, v]) => ({ label: `${v.icon} ${name}`, value: v.total }))
+    .sort((a, b) => b.value - a.value);
+  renderBarList('spendByCategoryList', categoryRows, (r) => `$${r.value.toFixed(2)}`);
+
+  // Grouped by exact item text (trimmed/lowercased) - receipt OCR rarely
+  // produces byte-identical text for the same product across visits, so this
+  // undercounts near-duplicates rather than guessing they're the same item.
+  const byItem = {};
+  items.forEach((i) => {
+    const key = i.label.trim().toLowerCase();
+    byItem[key] ??= { label: i.label.trim(), total: 0, count: 0 };
+    byItem[key].total += Number(i.price);
+    byItem[key].count += 1;
+  });
+  const itemStats = Object.values(byItem);
+
+  const frequentRows = itemStats
+    .filter((r) => r.count > 1)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10)
+    .map((r) => ({ label: r.label, value: r.count }));
+  renderBarList('frequentItemsList', frequentRows, (r) => `×${r.value}`, 'Buy the same item on 2+ receipts to see this.');
+
+  const topSpendRows = [...itemStats]
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 10)
+    .map((r) => ({ label: r.label, value: r.total }));
+  renderBarList('spendByItemList', topSpendRows, (r) => `$${r.value.toFixed(2)}`);
+}
+
+// Single-hue horizontal bar list - bar length is the only encoding, since
+// each row already carries its own text label (no need for a categorical
+// palette when identity is conveyed by the label, not by color).
+function renderBarList(containerId, rows, valueLabelFn, emptyText) {
+  const container = document.getElementById(containerId);
+  if (rows.length === 0) {
+    container.innerHTML = `<p class="no-rules-note">${emptyText ?? 'Not enough data yet.'}</p>`;
+    return;
+  }
+  const max = Math.max(...rows.map((r) => r.value));
+  container.innerHTML = rows
+    .map((r) => {
+      const pct = max > 0 ? (r.value / max) * 100 : 0;
+      return `
+        <div class="bar-row">
+          <div class="bar-row-label">${r.label}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+          <div class="bar-row-value">${valueLabelFn(r)}</div>
+        </div>
+      `;
+    })
+    .join('');
+}
+
+// ---------------------------------------------------------------------------
+// Shopping habits - how often an item gets ADDED to any list, regardless of
+// whether that list was ever completed or the purchase ever scanned. An
+// intent/habit signal, not proof of purchase - see Actual spending above
+// for real $ and real purchase counts.
 // ---------------------------------------------------------------------------
 async function loadAnalytics() {
-  const { data: completedLists } = await sb
+  const { data: lists } = await sb
     .from('shopping_lists')
     .select('id, list_date, created_at')
-    .eq('household_id', profile.household_id)
-    .eq('status', 'completed');
+    .eq('household_id', profile.household_id);
 
-  if (!completedLists || completedLists.length === 0) {
+  if (!lists || lists.length === 0) {
     renderAnalytics([]);
     return;
   }
-  const listDateById = Object.fromEntries(completedLists.map((l) => [l.id, l.list_date ?? l.created_at]));
+  const listDateById = Object.fromEntries(lists.map((l) => [l.id, l.list_date ?? l.created_at]));
 
   const { data: items } = await sb
     .from('list_items')
     .select('label, category_key, list_id')
-    .in('list_id', completedLists.map((l) => l.id));
+    .in('list_id', lists.map((l) => l.id));
 
   const stats = {};
   (items ?? []).forEach((item) => {
@@ -1395,7 +1522,7 @@ function renderAnalytics(rows) {
           <span class="item-icon">${classifyItem(r.label).icon}</span>
           <div class="analytics-row-info">
             <div class="analytics-row-label">${r.label}</div>
-            <div class="analytics-row-dates">First ${formatListDate(r.first)} · Last ${formatListDate(r.last)}</div>
+            <div class="analytics-row-dates">First added ${formatListDate(r.first)} · Last added ${formatListDate(r.last)}</div>
           </div>
           <div class="analytics-row-count">×${r.count}</div>
         </div>
@@ -1611,6 +1738,7 @@ document.getElementById('saveReceiptBtn').onclick = async () => {
     editingReceiptId = null;
     document.getElementById('receiptReviewCard').classList.add('hidden');
     await loadRecentReceipts();
+    await loadSpendingAnalytics();
   } catch (err) {
     status.textContent = err.message;
     status.className = 'save-status error';
@@ -1935,6 +2063,7 @@ document.getElementById('joinHouseholdBtn').onclick = async () => {
     await loadItems();
     await loadSettings();
     await loadAnalytics();
+    await loadSpendingAnalytics();
     await loadRecentReceipts();
   } finally {
     btn.disabled = false;
