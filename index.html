@@ -154,12 +154,14 @@
   .analytics-row-dates{ font-size:11px; color:var(--muted); margin-top:1px; }
   .analytics-row-count{ flex:none; font-family:var(--mono); font-size:13px; color:var(--accent); font-weight:600; text-align:right; }
   .receipt-items-editor{ display:flex; flex-direction:column; gap:6px; margin:10px 0; }
-  .receipt-item-row{ display:grid; grid-template-columns:1fr 90px auto; gap:6px; align-items:center; }
-  .receipt-item-row.has-match{ grid-template-columns:1fr 90px 1fr auto; }
+  .receipt-item-row{ display:grid; grid-template-columns:2.2fr 80px 1fr auto; gap:6px; align-items:center; }
   .receipt-item-row select{ font-size:12px; }
+  .receipt-item-new-category-row{ display:none; grid-column:1 / -1; gap:6px; margin-top:-2px; }
+  .receipt-item-new-category-row.visible{ display:flex; }
+  .receipt-item-new-category-row input{ flex:1; font-size:12px; }
+  .receipt-item-new-category-row input.receipt-item-new-icon{ flex:0 0 50px; text-align:center; }
   .receipt-total-row{ align-items:center; margin-top:10px; }
   .receipt-total-row input{ flex:0 0 110px; }
-  .receipt-match-toggle{ display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted); margin:12px 0; }
   .receipt-tile{
     display:flex; align-items:center; justify-content:space-between; gap:10px;
     border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:8px;
@@ -340,10 +342,6 @@
           <span class="settings-label">Total</span>
           <input id="receiptTotalInput" type="number" step="0.01" placeholder="0.00" />
         </div>
-        <label class="receipt-match-toggle hidden" id="receiptMatchToggleRow">
-          <input type="checkbox" id="receiptMarkMatchedInput" />
-          Also mark matched items as picked up in the list
-        </label>
         <div class="row">
           <button type="button" id="saveReceiptBtn" class="small">Save receipt</button>
           <button type="button" id="cancelReceiptBtn" class="ghost small">Cancel</button>
@@ -409,6 +407,7 @@
         <form id="addRuleForm" class="rule-form">
           <input id="ruleKeyword" placeholder="Word to match, e.g. margarine" />
           <select id="ruleCategory"></select>
+          <input id="ruleNewCategory" placeholder="New category name" class="hidden" />
           <input id="ruleIcon" placeholder="🧈" maxlength="4" class="rule-icon-input" />
           <button type="submit" class="small">Add rule</button>
         </form>
@@ -485,8 +484,6 @@ let leafletMap = null;
 
 // Receipt review state
 let editingReceiptId = null;
-let receiptListId = null; // list_id linked to the receipt being reviewed, if any
-let receiptMatchOptions = []; // [{id, label}] items from receiptListId, for the "matches list item" dropdowns
 let markersLayer = null;
 let lastResultsById = {}; // id -> store, for the currently rendered search results
 let customCategoryRules = []; // [{id, keyword, category, icon}] - household overrides, checked before ITEM_GROUP_RULES
@@ -1174,13 +1171,31 @@ function classifyItem(label) {
   const rule = ITEM_GROUP_RULES.find(([re]) => re.test(label));
   return rule ? { group: rule[1], icon: rule[2] } : { group: 'Other', icon: '🛒' };
 }
+// Built-in groups plus any brand-new category a household has introduced via
+// a category rule (e.g. "Alcohol", "Personal Care") - so custom categories
+// aren't silently invisible on the List tab, just because they're not one of
+// the categories this app shipped with.
+function knownCategories() {
+  const builtins = ITEM_GROUP_ORDER.filter((g) => g !== 'Other');
+  const custom = [...new Set(customCategoryRules.map((r) => r.category))].filter(
+    (c) => !builtins.includes(c) && c !== 'Other',
+  );
+  return [...builtins, ...custom.sort()];
+}
+function iconForCategory(category) {
+  const customMatch = customCategoryRules.find((r) => r.category === category);
+  if (customMatch) return customMatch.icon;
+  const builtinMatch = ITEM_GROUP_RULES.find(([, group]) => group === category);
+  return builtinMatch ? builtinMatch[2] : '🛒';
+}
 function groupItemsForDisplay(items) {
   const groups = {};
   items.forEach((item) => {
     const { group } = classifyItem(item.label);
     (groups[group] ??= []).push(item);
   });
-  return ITEM_GROUP_ORDER.map((group) => ({ group, items: groups[group] ?? [] })).filter((g) => g.items.length > 0);
+  const order = [...knownCategories(), 'Other'];
+  return order.map((group) => ({ group, items: groups[group] ?? [] })).filter((g) => g.items.length > 0);
 }
 
 // Interactive list management (add/check/delete) - no price data here, that's
@@ -1422,7 +1437,6 @@ async function handleReceiptFileSelected(file) {
     status.textContent = '';
     await openReceiptReview({
       receiptId,
-      listId: currentListId || null,
       storeLabel: fnData.draft.store_label ?? '',
       receiptDate: fnData.draft.receipt_date ?? '',
       total: fnData.draft.total ?? '',
@@ -1437,28 +1451,19 @@ async function handleReceiptFileSelected(file) {
   }
 }
 
-async function openReceiptReview({ receiptId, listId, storeLabel, receiptDate, total, items, note }) {
+async function openReceiptReview({ receiptId, storeLabel, receiptDate, total, items, note }) {
   editingReceiptId = receiptId;
-  receiptListId = listId;
-  receiptMatchOptions = [];
-
-  if (listId) {
-    const { data } = await sb.from('list_items').select('id, label').eq('list_id', listId);
-    receiptMatchOptions = data ?? [];
-  }
 
   document.getElementById('receiptReviewNote').textContent = note ?? '';
   document.getElementById('receiptStoreInput').value = storeLabel ?? '';
   document.getElementById('receiptDateInput').value = receiptDate ?? '';
   document.getElementById('receiptTotalInput').value = total ?? '';
-  document.getElementById('receiptMatchToggleRow').classList.toggle('hidden', receiptMatchOptions.length === 0);
-  document.getElementById('receiptMarkMatchedInput').checked = false;
 
   renderReceiptItemsEditor(
     items.map((i) => ({
       label: i.label,
       price: i.price,
-      matchedId: i.matchedId !== undefined ? i.matchedId : guessMatch(i.label),
+      category: i.category ?? classifyItem(i.label).group,
     })),
   );
 
@@ -1467,52 +1472,40 @@ async function openReceiptReview({ receiptId, listId, storeLabel, receiptDate, t
   document.getElementById('receiptReviewCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-// Best-effort exact/substring match against the linked list's items - purely
-// a starting point for the dropdown. Never applied automatically; the user
-// confirms or changes every row before anything is saved.
-function guessMatch(label) {
-  const needle = (label ?? '').toLowerCase().trim();
-  if (!needle) return '';
-  const exact = receiptMatchOptions.find((i) => i.label.toLowerCase().trim() === needle);
-  if (exact) return exact.id;
-  const partial = receiptMatchOptions.find(
-    (i) => needle.includes(i.label.toLowerCase().trim()) || i.label.toLowerCase().includes(needle),
-  );
-  return partial ? partial.id : '';
-}
-
-function matchSelectHtml(matchedId) {
-  const options = receiptMatchOptions
-    .map((i) => `<option value="${i.id}" ${i.id === matchedId ? 'selected' : ''}>${escapeAttr(i.label)}</option>`)
-    .join('');
-  return `<select class="receipt-item-match"><option value="">No match</option>${options}</select>`;
-}
-
-function receiptItemRowHtml(label, price, matchedId) {
-  const hasMatch = receiptMatchOptions.length > 0;
+function receiptItemRowHtml(label, price, category) {
   return `
-    <div class="receipt-item-row${hasMatch ? ' has-match' : ''}">
+    <div class="receipt-item-row">
       <input class="receipt-item-label" value="${escapeAttr(label)}" placeholder="Item" />
       <input class="receipt-item-price" type="number" step="0.01" value="${price ?? ''}" placeholder="0.00" />
-      ${hasMatch ? matchSelectHtml(matchedId) : ''}
+      <select class="receipt-item-category">${categoryOptionsHtml(category)}</select>
       <button type="button" class="ghost small receipt-item-remove" aria-label="Remove item">✕</button>
+      <div class="receipt-item-new-category-row">
+        <input class="receipt-item-new-category" placeholder="New category name" />
+        <input class="receipt-item-new-icon" placeholder="🛒" maxlength="4" />
+      </div>
     </div>
   `;
 }
 
 function renderReceiptItemsEditor(items) {
   document.getElementById('receiptItemsEditor').innerHTML = items
-    .map((i) => receiptItemRowHtml(i.label, i.price, i.matchedId))
+    .map((i) => receiptItemRowHtml(i.label, i.price, i.category))
     .join('');
 }
 
 document.getElementById('addReceiptItemBtn').onclick = () => {
-  document.getElementById('receiptItemsEditor').insertAdjacentHTML('beforeend', receiptItemRowHtml('', '', ''));
+  document.getElementById('receiptItemsEditor').insertAdjacentHTML('beforeend', receiptItemRowHtml('', '', 'Other'));
 };
 
 document.addEventListener('click', (e) => {
   const removeBtn = e.target.closest('.receipt-item-remove');
   if (removeBtn) removeBtn.closest('.receipt-item-row').remove();
+});
+
+document.addEventListener('change', (e) => {
+  if (!e.target.classList.contains('receipt-item-category')) return;
+  const subRow = e.target.closest('.receipt-item-row').querySelector('.receipt-item-new-category-row');
+  subRow.classList.toggle('visible', e.target.value === '__new__');
 });
 
 document.getElementById('cancelReceiptBtn').onclick = () => {
@@ -1526,15 +1519,20 @@ document.getElementById('saveReceiptBtn').onclick = async () => {
   if (!editingReceiptId) return;
 
   const rows = [...document.querySelectorAll('#receiptItemsEditor .receipt-item-row')]
-    .map((row) => ({
-      label: row.querySelector('.receipt-item-label').value.trim(),
-      price: parseFloat(row.querySelector('.receipt-item-price').value),
-      matchedId: row.querySelector('.receipt-item-match')?.value || null,
-    }))
-    .filter((r) => r.label && !Number.isNaN(r.price));
+    .map((row) => {
+      const selectValue = row.querySelector('.receipt-item-category').value;
+      const isNew = selectValue === '__new__';
+      return {
+        label: row.querySelector('.receipt-item-label').value.trim(),
+        price: parseFloat(row.querySelector('.receipt-item-price').value),
+        category: isNew ? row.querySelector('.receipt-item-new-category').value.trim() : selectValue,
+        icon: isNew ? row.querySelector('.receipt-item-new-icon').value.trim() || '🛒' : null,
+      };
+    })
+    .filter((r) => r.label && !Number.isNaN(r.price) && r.category);
 
   if (rows.length === 0) {
-    status.textContent = 'Add at least one item with a price before saving.';
+    status.textContent = 'Add at least one item with a price and category before saving.';
     status.className = 'save-status error';
     return;
   }
@@ -1547,7 +1545,6 @@ document.getElementById('saveReceiptBtn').onclick = async () => {
     const receiptDate = document.getElementById('receiptDateInput').value || null;
     const totalRaw = document.getElementById('receiptTotalInput').value;
     const total = totalRaw === '' ? null : parseFloat(totalRaw);
-    const markMatched = document.getElementById('receiptMarkMatchedInput').checked;
 
     const { error: updateErr } = await sb
       .from('receipts')
@@ -1566,18 +1563,34 @@ document.getElementById('saveReceiptBtn').onclick = async () => {
         receipt_id: editingReceiptId,
         label: r.label,
         price: r.price,
-        matched_list_item_id: r.matchedId,
       })),
     );
     if (itemsInsertErr) throw itemsInsertErr;
 
-    if (markMatched) {
-      const matchedIds = rows.map((r) => r.matchedId).filter(Boolean);
-      if (matchedIds.length > 0) {
-        await sb.from('list_items').update({ checked: true }).in('id', matchedIds);
-        await loadItems(); // refresh the List tab if any matched items are in the currently open list
+    // Teach the household's category rules whenever a row's category differs
+    // from what classifyItem() would currently guess - covers both "picked a
+    // brand-new category" and "corrected an existing wrong guess." Same
+    // rules table Settings uses, so this also fixes the item on the List tab
+    // and on every future receipt, not just this one.
+    let learnedAny = false;
+    for (const r of rows) {
+      const current = classifyItem(r.label);
+      if (current.group === r.category) continue;
+      const icon = r.icon ?? iconForCategory(r.category);
+      const existingRule = customCategoryRules.find((rule) => rule.keyword.toLowerCase() === r.label.toLowerCase());
+      if (existingRule) {
+        await sb.from('item_category_rules').update({ category: r.category, icon }).eq('id', existingRule.id);
+      } else {
+        await sb.from('item_category_rules').insert({
+          household_id: profile.household_id,
+          keyword: r.label,
+          category: r.category,
+          icon,
+        });
       }
+      learnedAny = true;
     }
+    if (learnedAny) await loadCategoryRules(); // refresh customCategoryRules + List/Prices tabs
 
     status.textContent = 'Receipt saved.';
     status.className = 'save-status ok';
@@ -1644,11 +1657,10 @@ async function openExistingReceipt(receiptId) {
 
   await openReceiptReview({
     receiptId: receipt.id,
-    listId: receipt.list_id,
     storeLabel: receipt.store_label,
     receiptDate: receipt.receipt_date,
     total: receipt.total,
-    items: (items ?? []).map((i) => ({ label: i.label, price: i.price, matchedId: i.matched_list_item_id })),
+    items: (items ?? []).map((i) => ({ label: i.label, price: i.price })),
     note:
       receipt.status === 'failed'
         ? 'This receipt failed to read automatically — add items manually below.'
@@ -1687,15 +1699,28 @@ async function loadSettings() {
   await loadCategoryRules();
 }
 
-// Populate the category dropdown once from the same list the built-in rules
-// and the group headings use, so a custom rule always lands somewhere that
-// actually gets displayed. "Other" is the fallback, not a real target.
-(function populateRuleCategorySelect() {
-  const select = document.getElementById('ruleCategory');
-  select.innerHTML = ITEM_GROUP_ORDER.filter((g) => g !== 'Other')
-    .map((g) => `<option value="${g}">${g}</option>`)
+// Shared by the Settings rule form and the receipt review row: every known
+// category (built-in + household-introduced), "Other" as the catch-all, and
+// a "+ Add new category" option that reveals a free-text name field.
+function categoryOptionsHtml(selected) {
+  const options = [...knownCategories(), 'Other']
+    .map((g) => `<option value="${escapeAttr(g)}" ${g === selected ? 'selected' : ''}>${g}</option>`)
     .join('');
-})();
+  return `${options}<option value="__new__" ${selected === '__new__' ? 'selected' : ''}>+ Add new category…</option>`;
+}
+
+// Rebuilt every time customCategoryRules reloads (not just once) so a
+// category introduced from the receipt review screen shows up here too.
+function renderRuleCategorySelect() {
+  const select = document.getElementById('ruleCategory');
+  const previousValue = select.value;
+  select.innerHTML = categoryOptionsHtml(null);
+  if ([...select.options].some((o) => o.value === previousValue)) select.value = previousValue;
+}
+
+document.getElementById('ruleCategory').onchange = (e) => {
+  document.getElementById('ruleNewCategory').classList.toggle('hidden', e.target.value !== '__new__');
+};
 
 async function loadCategoryRules() {
   const { data } = await sb
@@ -1710,6 +1735,7 @@ async function loadCategoryRules() {
 }
 
 function renderCategoryRules() {
+  renderRuleCategorySelect();
   const list = document.getElementById('categoryRulesList');
   if (customCategoryRules.length === 0) {
     list.innerHTML = '<p class="no-rules-note">No custom rules yet - items you haven\'t taught it about show a shopping trolley icon under "Other".</p>';
@@ -1739,9 +1765,11 @@ document.getElementById('addRuleForm').onsubmit = async (e) => {
   e.preventDefault();
   const status = document.getElementById('ruleStatus');
   const keyword = document.getElementById('ruleKeyword').value.trim();
-  const category = document.getElementById('ruleCategory').value;
+  const selectValue = document.getElementById('ruleCategory').value;
+  const category = selectValue === '__new__' ? document.getElementById('ruleNewCategory').value.trim() : selectValue;
   const icon = document.getElementById('ruleIcon').value.trim() || '🛒';
   if (!keyword) { status.textContent = 'Enter a word to match first.'; status.className = 'save-status error'; return; }
+  if (!category) { status.textContent = 'Enter a name for the new category.'; status.className = 'save-status error'; return; }
 
   const { error } = await sb.from('item_category_rules').insert({
     household_id: profile.household_id,
@@ -1757,6 +1785,8 @@ document.getElementById('addRuleForm').onsubmit = async (e) => {
   status.textContent = '';
   document.getElementById('ruleKeyword').value = '';
   document.getElementById('ruleIcon').value = '';
+  document.getElementById('ruleNewCategory').value = '';
+  document.getElementById('ruleNewCategory').classList.add('hidden');
   await loadCategoryRules();
 };
 
