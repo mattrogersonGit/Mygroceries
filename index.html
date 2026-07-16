@@ -1241,10 +1241,14 @@ function classifyItem(label) {
     const cat = categories.find((c) => c.id === custom.category_id);
     if (cat) return { group: cat.name, icon: cat.icon, categoryId: cat.id };
   }
+  // Built-in guesses keep their own per-keyword icon (milk 🥛 vs cheese 🧀 vs
+  // eggs 🥚, all "Fridge, Deli & Eggs") rather than the category's single
+  // shared icon - only household-defined rules above use the category icon,
+  // since a rule doesn't carry its own icon anymore.
   const builtin = ITEM_GROUP_RULES.find(([re]) => re.test(label));
   if (builtin) {
     const cat = categories.find((c) => c.name === builtin[1]);
-    if (cat) return { group: cat.name, icon: cat.icon, categoryId: cat.id };
+    if (cat) return { group: cat.name, icon: builtin[2], categoryId: cat.id };
   }
   const other = categories.find((c) => c.name === 'Other');
   return other
