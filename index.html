@@ -175,8 +175,9 @@
   .bar-fill{ height:100%; background:var(--accent); border-radius:4px; }
   .bar-row-value{ flex:none; font-family:var(--mono); font-size:12px; color:var(--muted); text-align:right; }
   .receipt-items-editor{ display:flex; flex-direction:column; gap:6px; margin:10px 0; }
-  .receipt-item-row{ display:grid; grid-template-columns:1.8fr 60px 1fr auto; gap:6px; align-items:center; }
+  .receipt-item-row{ display:grid; grid-template-columns:1.6fr 38px 55px 1fr auto; gap:6px; align-items:center; }
   .receipt-item-row input, .receipt-item-row select{ font-size:11px; padding:9px 6px; }
+  .receipt-item-qty{ text-align:center; padding-left:2px !important; padding-right:2px !important; }
   .receipt-total-row{ align-items:center; margin-top:10px; }
   .receipt-total-row input{ flex:0 0 110px; }
   .receipt-tile{
@@ -1385,7 +1386,7 @@ function renderPrices() {
 // intent signal from list additions and is never merged with these numbers.
 // ---------------------------------------------------------------------------
 async function loadSpendingAnalytics() {
-  const { data } = await sb.from('receipt_items').select('label, price').eq('household_id', profile.household_id);
+  const { data } = await sb.from('receipt_items').select('label, qty, price').eq('household_id', profile.household_id);
   renderSpendingAnalytics(data ?? []);
 }
 
@@ -1414,12 +1415,14 @@ function renderSpendingAnalytics(items) {
   // Grouped by exact item text (trimmed/lowercased) - receipt OCR rarely
   // produces byte-identical text for the same product across visits, so this
   // undercounts near-duplicates rather than guessing they're the same item.
+  // count is total units (qty), not receipt-line count, so "3 x" on one
+  // receipt already counts as 3, not 1.
   const byItem = {};
   items.forEach((i) => {
     const key = i.label.trim().toLowerCase();
     byItem[key] ??= { label: i.label.trim(), total: 0, count: 0 };
     byItem[key].total += Number(i.price);
-    byItem[key].count += 1;
+    byItem[key].count += Number(i.qty) || 1;
   });
   const itemStats = Object.values(byItem);
 
@@ -1607,6 +1610,7 @@ async function openReceiptReview({ receiptId, storeLabel, receiptDate, total, it
   renderReceiptItemsEditor(
     items.map((i) => ({
       label: i.label,
+      qty: i.qty ?? 1,
       price: i.price,
       categoryId: i.categoryId !== undefined ? i.categoryId : classifyItem(i.label).categoryId,
     })),
@@ -1617,14 +1621,15 @@ async function openReceiptReview({ receiptId, storeLabel, receiptDate, total, it
   document.getElementById('receiptReviewCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function receiptItemRowHtml(label, price, categoryId) {
+function receiptItemRowHtml(label, qty, price, categoryId) {
   const options = categories
     .map((c) => `<option value="${c.id}" ${c.id === categoryId ? 'selected' : ''}>${c.icon} ${escapeAttr(c.name)}</option>`)
     .join('');
   return `
     <div class="receipt-item-row">
       <input class="receipt-item-label" value="${escapeAttr(label)}" placeholder="Item" />
-      <input class="receipt-item-price" type="number" step="0.01" value="${price ?? ''}" placeholder="0.00" />
+      <input class="receipt-item-qty" type="number" step="1" min="1" value="${qty ?? 1}" placeholder="1" title="Quantity" />
+      <input class="receipt-item-price" type="number" step="0.01" value="${price ?? ''}" placeholder="0.00" title="Line total" />
       <select class="receipt-item-category">${options}</select>
       <button type="button" class="ghost small receipt-item-remove" aria-label="Remove item">✕</button>
     </div>
@@ -1633,13 +1638,13 @@ function receiptItemRowHtml(label, price, categoryId) {
 
 function renderReceiptItemsEditor(items) {
   document.getElementById('receiptItemsEditor').innerHTML = items
-    .map((i) => receiptItemRowHtml(i.label, i.price, i.categoryId))
+    .map((i) => receiptItemRowHtml(i.label, i.qty, i.price, i.categoryId))
     .join('');
 }
 
 document.getElementById('addReceiptItemBtn').onclick = () => {
   const otherId = categories.find((c) => c.name === 'Other')?.id ?? '';
-  document.getElementById('receiptItemsEditor').insertAdjacentHTML('beforeend', receiptItemRowHtml('', '', otherId));
+  document.getElementById('receiptItemsEditor').insertAdjacentHTML('beforeend', receiptItemRowHtml('', 1, '', otherId));
 };
 
 document.addEventListener('click', (e) => {
@@ -1660,6 +1665,7 @@ document.getElementById('saveReceiptBtn').onclick = async () => {
   const rows = [...document.querySelectorAll('#receiptItemsEditor .receipt-item-row')]
     .map((row) => ({
       label: row.querySelector('.receipt-item-label').value.trim(),
+      qty: parseInt(row.querySelector('.receipt-item-qty').value, 10) || 1,
       price: parseFloat(row.querySelector('.receipt-item-price').value),
       categoryId: row.querySelector('.receipt-item-category').value,
     }))
@@ -1696,6 +1702,7 @@ document.getElementById('saveReceiptBtn').onclick = async () => {
         household_id: profile.household_id,
         receipt_id: editingReceiptId,
         label: r.label,
+        qty: r.qty,
         price: r.price,
       })),
     );
@@ -1793,7 +1800,7 @@ async function openExistingReceipt(receiptId) {
     storeLabel: receipt.store_label,
     receiptDate: receipt.receipt_date,
     total: receipt.total,
-    items: (items ?? []).map((i) => ({ label: i.label, price: i.price })),
+    items: (items ?? []).map((i) => ({ label: i.label, qty: i.qty, price: i.price })),
     note:
       receipt.status === 'failed'
         ? 'This receipt failed to read automatically — add items manually below.'

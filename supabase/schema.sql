@@ -150,6 +150,7 @@ create table receipt_items (
   household_id uuid not null references households(id) on delete cascade,  -- denormalized, same pattern as list_items
   receipt_id uuid not null references receipts(id) on delete cascade,
   label text not null,
+  qty int not null default 1,     -- units purchased on this line; price is the line's total, not per-unit
   price numeric(10,2) not null,
   matched_list_item_id uuid references list_items(id) on delete set null,
   created_at timestamptz not null default now()

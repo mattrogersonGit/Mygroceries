@@ -68,9 +68,10 @@ const RECEIPT_SCHEMA = {
         type: "object",
         properties: {
           label: { type: "string" },
-          price: { type: "number", description: "Price in dollars, not cents" },
+          qty: { type: "integer", description: "Units purchased on this line - 1 unless the receipt shows a multiple like '2 x'" },
+          price: { type: "number", description: "Total price for this line in dollars (not per-unit, not cents)" },
         },
-        required: ["label", "price"],
+        required: ["label", "qty", "price"],
         additionalProperties: false,
       },
     },
@@ -151,9 +152,12 @@ Deno.serve(async (req) => {
               type: "text",
               text:
                 "This is a photo or PDF of a grocery store receipt. Extract the store name, the receipt date, the " +
-                "total amount paid, and every purchased line item with its price in dollars (not cents). Skip " +
-                "subtotal, tax, tender, change, and loyalty-points lines - only include actual purchased items. " +
-                "If a field isn't legible or present, use null rather than guessing.",
+                "total amount paid, and every purchased line item with its quantity and price in dollars (not " +
+                "cents). Quantity is 1 unless the line explicitly shows a multiple (e.g. '2 x', '3 @ $1.50 ea'). " +
+                "Price is the total for that line, not the per-unit price - if a line shows '2 x $3.00' with a " +
+                "line total of $6.00, report qty 2 and price 6.00, not price 3.00. Skip subtotal, tax, tender, " +
+                "change, and loyalty-points lines - only include actual purchased items. If a field isn't legible " +
+                "or present, use null (or 1 for quantity) rather than guessing.",
             },
             fileContentBlock,
           ],
