@@ -136,10 +136,12 @@
   .rule-group summary::before{ content:'▸'; color:var(--muted); font-size:11px; width:10px; }
   .rule-group[open] summary::before{ content:'▾'; }
   .rule-group-count{ color:var(--muted); font-weight:400; font-size:12px; }
-  .rule-form{ display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
-  .rule-form input, .rule-form select{ flex:1; min-width:110px; }
-  .rule-form-hint{ margin-top:6px; }
-  .rule-icon-input{ flex:0 0 60px !important; text-align:center; }
+  .rule-form{ display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; align-items:flex-end; }
+  .rule-form-field{ display:flex; flex-direction:column; gap:4px; flex:1; min-width:150px; }
+  .rule-form-label{ font-size:11px; color:var(--muted); }
+  .rule-form input, .rule-form select{ width:100%; }
+  .rule-icon-field{ flex:0 0 60px; min-width:60px; }
+  .rule-icon-input{ width:60px !important; text-align:center; }
   .no-rules-note{ color:var(--muted); font-size:12px; font-style:italic; padding:4px 0; }
   #createListForm{ display:flex; flex-direction:column; gap:8px; }
   .list-tile{
@@ -406,17 +408,38 @@
       </section>
 
       <section class="card">
+        <h2>Categories</h2>
+        <p class="muted">The aisle/spend groups used across your list, receipts, and analytics. Add ones you need, remove ones you don't.</p>
+        <div id="categoriesList"></div>
+        <form id="addCategoryForm" class="rule-form">
+          <label class="rule-form-field">
+            <span class="rule-form-label">New category name</span>
+            <input id="categoryName" placeholder="e.g. Alcohol" />
+          </label>
+          <label class="rule-form-field rule-icon-field">
+            <span class="rule-form-label">Icon</span>
+            <input id="categoryIcon" placeholder="🍷" maxlength="4" class="rule-icon-input" />
+          </label>
+          <button type="submit" class="small">Add category</button>
+        </form>
+        <span id="categoryStatus" class="save-status"></span>
+      </section>
+
+      <section class="card">
         <h2>Category rules</h2>
-        <p class="muted">Items that don't get the right aisle or icon automatically (e.g. "margarine" not being recognised as dairy) - add a rule here to fix it for everyone in your household, permanently.</p>
+        <p class="muted">Items that don't get the right category automatically (e.g. "margarine" not being recognised as dairy) - pick a category above, then match a word to it here, for everyone in your household, permanently.</p>
         <div id="categoryRulesList"></div>
         <form id="addRuleForm" class="rule-form">
-          <input id="ruleKeyword" placeholder="Word to match, e.g. margarine" />
-          <input id="ruleCategory" list="categoryDatalist" placeholder="Category - existing or new" />
-          <input id="ruleIcon" placeholder="🧈" maxlength="4" class="rule-icon-input" />
+          <label class="rule-form-field">
+            <span class="rule-form-label">Word to match</span>
+            <input id="ruleKeyword" placeholder="e.g. margarine" />
+          </label>
+          <label class="rule-form-field">
+            <span class="rule-form-label">Category</span>
+            <select id="ruleCategory"></select>
+          </label>
           <button type="submit" class="small">Add rule</button>
         </form>
-        <p class="muted rule-form-hint">Category can be one you already have, or type a brand new name (e.g. "Alcohol") to create it.</p>
-        <datalist id="categoryDatalist"></datalist>
         <span id="ruleStatus" class="save-status"></span>
       </section>
 
@@ -492,7 +515,8 @@ let leafletMap = null;
 let editingReceiptId = null;
 let markersLayer = null;
 let lastResultsById = {}; // id -> store, for the currently rendered search results
-let customCategoryRules = []; // [{id, keyword, category, icon}] - household overrides, checked before ITEM_GROUP_RULES
+let categories = []; // [{id, name, icon}] - the household's real, editable category list
+let customCategoryRules = []; // [{id, keyword, category_id}] - household overrides, checked before ITEM_GROUP_RULES
 
 // Shopping lists state
 let allLists = []; // shopping_lists rows for this household
@@ -535,6 +559,7 @@ async function onSignedIn(s) {
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('who').textContent = profile?.display_name ?? session.user.email;
   await loadStores();
+  await loadCategories(); // before loadCategoryRules()/loadItems() - classifyItem() needs the category list loaded
   await loadCategoryRules(); // before loadItems() so the first render already has custom rules applied
   await loadLists(); // resolves currentListId before loadItems() needs it
   await loadItems();
@@ -1124,75 +1149,71 @@ async function fetchPricesForItems() {
 // for anything else. "group" here is a display-only grouping and unrelated
 // to list_items.category_key (which is the price-search term, a different
 // concept entirely) - kept named differently on purpose to avoid confusion.
+// Built-in first-guess keywords, pointed at the household's actual category
+// names (from the `categories` table). If a household renames or deletes one
+// of these, the guess just fails to resolve below and falls through to
+// "Other" - self-healing, no code change needed.
 const ITEM_GROUP_RULES = [
-  [/\bmilk\b/i, 'Dairy & Eggs', '🥛'],
-  [/cheese/i, 'Dairy & Eggs', '🧀'],
-  [/yog(h)?urt/i, 'Dairy & Eggs', '🥣'],
-  [/butter|marg\b/i, 'Dairy & Eggs', '🧈'],
-  [/cream/i, 'Dairy & Eggs', '🥛'],
-  [/\begg/i, 'Dairy & Eggs', '🥚'],
+  [/\bmilk\b/i, 'Fridge, Deli & Eggs', '🥛'],
+  [/cheese/i, 'Fridge, Deli & Eggs', '🧀'],
+  [/yog(h)?urt/i, 'Fridge, Deli & Eggs', '🥣'],
+  [/butter|marg\b/i, 'Fridge, Deli & Eggs', '🧈'],
+  [/cream/i, 'Fridge, Deli & Eggs', '🥛'],
+  [/\begg/i, 'Fridge, Deli & Eggs', '🥚'],
   [/bread|toast|bun|bagel/i, 'Bakery', '🍞'],
   [/cake|muffin|pastry|biscuit|cookie/i, 'Bakery', '🍪'],
-  [/chicken/i, 'Meat & Seafood', '🍗'],
-  [/beef|steak|mince|lamb|pork|bacon|ham|sausage/i, 'Meat & Seafood', '🥩'],
-  [/fish|salmon|tuna|seafood|prawn/i, 'Meat & Seafood', '🐟'],
-  [/apple/i, 'Fruit & Veg', '🍎'],
-  [/banana/i, 'Fruit & Veg', '🍌'],
-  [/orange|mandarin|citrus/i, 'Fruit & Veg', '🍊'],
-  [/grape/i, 'Fruit & Veg', '🍇'],
-  [/berry|berries/i, 'Fruit & Veg', '🍓'],
-  [/avocado/i, 'Fruit & Veg', '🥑'],
-  [/potato/i, 'Fruit & Veg', '🥔'],
-  [/tomato/i, 'Fruit & Veg', '🍅'],
-  [/carrot/i, 'Fruit & Veg', '🥕'],
-  [/onion|garlic/i, 'Fruit & Veg', '🧅'],
-  [/lettuce|salad|spinach|greens/i, 'Fruit & Veg', '🥬'],
+  [/chicken/i, 'Meat, Poultry & Seafood', '🍗'],
+  [/beef|steak|mince|lamb|pork|bacon|ham|sausage/i, 'Meat, Poultry & Seafood', '🥩'],
+  [/fish|salmon|tuna|seafood|prawn/i, 'Meat, Poultry & Seafood', '🐟'],
+  [/apple/i, 'Fruit & Vegetables', '🍎'],
+  [/banana/i, 'Fruit & Vegetables', '🍌'],
+  [/orange|mandarin|citrus/i, 'Fruit & Vegetables', '🍊'],
+  [/grape/i, 'Fruit & Vegetables', '🍇'],
+  [/berry|berries/i, 'Fruit & Vegetables', '🍓'],
+  [/avocado/i, 'Fruit & Vegetables', '🥑'],
+  [/potato/i, 'Fruit & Vegetables', '🥔'],
+  [/tomato/i, 'Fruit & Vegetables', '🍅'],
+  [/carrot/i, 'Fruit & Vegetables', '🥕'],
+  [/onion|garlic/i, 'Fruit & Vegetables', '🧅'],
+  [/lettuce|salad|spinach|greens/i, 'Fruit & Vegetables', '🥬'],
   [/rice/i, 'Pantry', '🍚'],
   [/pasta|noodle|spaghetti/i, 'Pantry', '🍝'],
   [/cereal|muesli/i, 'Pantry', '🥣'],
   [/oil\b/i, 'Pantry', '🫙'],
   [/honey|sauce|ketchup|mayo/i, 'Pantry', '🍯'],
-  [/chocolate|choc\b/i, 'Snacks', '🍫'],
-  [/chip|crisp/i, 'Snacks', '🍟'],
-  [/coffee/i, 'Drinks', '☕'],
-  [/\btea\b/i, 'Drinks', '🍵'],
-  [/juice/i, 'Drinks', '🧃'],
-  [/water/i, 'Drinks', '💧'],
-  [/wine/i, 'Drinks', '🍷'],
-  [/beer/i, 'Drinks', '🍺'],
+  [/chocolate|choc\b/i, 'Snacks, Treats & Easy Meals', '🍫'],
+  [/chip|crisp|cracker/i, 'Snacks, Treats & Easy Meals', '🍟'],
+  [/coffee/i, 'Hot & Cold Drinks', '☕'],
+  [/\btea\b/i, 'Hot & Cold Drinks', '🍵'],
+  [/juice/i, 'Hot & Cold Drinks', '🧃'],
+  [/water/i, 'Hot & Cold Drinks', '💧'],
+  [/wine/i, 'Beer, Wine & Cider', '🍷'],
+  [/beer|cider/i, 'Beer, Wine & Cider', '🍺'],
   [/frozen/i, 'Frozen', '🧊'],
-  [/soap|detergent|dishwash/i, 'Household', '🧼'],
-  [/toilet paper|tissue|paper towel/i, 'Household', '🧻'],
-  [/nappy|diaper/i, 'Household', '🍼'],
+  [/shampoo|body wash|toothpaste|deodorant|\bsoap\b/i, 'Health & Body', '🧴'],
+  [/nappy|diaper|baby wipe/i, 'Baby & Toddler', '🍼'],
+  [/dog food|cat food|\bpet\b/i, 'Pets', '🐾'],
+  [/detergent|dishwash|toilet paper|tissue|paper towel/i, 'Household & Cleaning', '🧼'],
 ];
-const ITEM_GROUP_ORDER = [
-  'Fruit & Veg', 'Bakery', 'Meat & Seafood', 'Dairy & Eggs', 'Pantry',
-  'Frozen', 'Drinks', 'Snacks', 'Household', 'Other',
-];
+// Household-defined rules win over the built-in guesses (checked first), so
+// a household can always correct something the keyword list gets wrong.
+// Both layers resolve to a row in the `categories` table - if that row no
+// longer exists (renamed/deleted), the guess is skipped rather than shown.
 function classifyItem(label) {
-  // Household-defined rules win over the built-in guesses, so a household
-  // can always correct something the keyword list gets wrong.
   const custom = customCategoryRules.find((r) => label.toLowerCase().includes(r.keyword.toLowerCase()));
-  if (custom) return { group: custom.category, icon: custom.icon };
-  const rule = ITEM_GROUP_RULES.find(([re]) => re.test(label));
-  return rule ? { group: rule[1], icon: rule[2] } : { group: 'Other', icon: '🛒' };
-}
-// Built-in groups plus any brand-new category a household has introduced via
-// a category rule (e.g. "Alcohol", "Personal Care") - so custom categories
-// aren't silently invisible on the List tab, just because they're not one of
-// the categories this app shipped with.
-function knownCategories() {
-  const builtins = ITEM_GROUP_ORDER.filter((g) => g !== 'Other');
-  const custom = [...new Set(customCategoryRules.map((r) => r.category))].filter(
-    (c) => !builtins.includes(c) && c !== 'Other',
-  );
-  return [...builtins, ...custom.sort()];
-}
-function iconForCategory(category) {
-  const customMatch = customCategoryRules.find((r) => r.category === category);
-  if (customMatch) return customMatch.icon;
-  const builtinMatch = ITEM_GROUP_RULES.find(([, group]) => group === category);
-  return builtinMatch ? builtinMatch[2] : '🛒';
+  if (custom) {
+    const cat = categories.find((c) => c.id === custom.category_id);
+    if (cat) return { group: cat.name, icon: cat.icon, categoryId: cat.id };
+  }
+  const builtin = ITEM_GROUP_RULES.find(([re]) => re.test(label));
+  if (builtin) {
+    const cat = categories.find((c) => c.name === builtin[1]);
+    if (cat) return { group: cat.name, icon: cat.icon, categoryId: cat.id };
+  }
+  const other = categories.find((c) => c.name === 'Other');
+  return other
+    ? { group: other.name, icon: other.icon, categoryId: other.id }
+    : { group: 'Other', icon: '🛒', categoryId: null };
 }
 function groupItemsForDisplay(items) {
   const groups = {};
@@ -1200,7 +1221,7 @@ function groupItemsForDisplay(items) {
     const { group } = classifyItem(item.label);
     (groups[group] ??= []).push(item);
   });
-  const order = [...knownCategories(), 'Other'];
+  const order = [...categories.filter((c) => c.name !== 'Other').map((c) => c.name), 'Other'];
   return order.map((group) => ({ group, items: groups[group] ?? [] })).filter((g) => g.items.length > 0);
 }
 
@@ -1469,7 +1490,7 @@ async function openReceiptReview({ receiptId, storeLabel, receiptDate, total, it
     items.map((i) => ({
       label: i.label,
       price: i.price,
-      category: i.category ?? classifyItem(i.label).group,
+      categoryId: i.categoryId !== undefined ? i.categoryId : classifyItem(i.label).categoryId,
     })),
   );
 
@@ -1478,12 +1499,15 @@ async function openReceiptReview({ receiptId, storeLabel, receiptDate, total, it
   document.getElementById('receiptReviewCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function receiptItemRowHtml(label, price, category) {
+function receiptItemRowHtml(label, price, categoryId) {
+  const options = categories
+    .map((c) => `<option value="${c.id}" ${c.id === categoryId ? 'selected' : ''}>${c.icon} ${escapeAttr(c.name)}</option>`)
+    .join('');
   return `
     <div class="receipt-item-row">
       <input class="receipt-item-label" value="${escapeAttr(label)}" placeholder="Item" />
       <input class="receipt-item-price" type="number" step="0.01" value="${price ?? ''}" placeholder="0.00" />
-      <input class="receipt-item-category" list="categoryDatalist" value="${escapeAttr(category)}" placeholder="Category" />
+      <select class="receipt-item-category">${options}</select>
       <button type="button" class="ghost small receipt-item-remove" aria-label="Remove item">✕</button>
     </div>
   `;
@@ -1491,12 +1515,13 @@ function receiptItemRowHtml(label, price, category) {
 
 function renderReceiptItemsEditor(items) {
   document.getElementById('receiptItemsEditor').innerHTML = items
-    .map((i) => receiptItemRowHtml(i.label, i.price, i.category))
+    .map((i) => receiptItemRowHtml(i.label, i.price, i.categoryId))
     .join('');
 }
 
 document.getElementById('addReceiptItemBtn').onclick = () => {
-  document.getElementById('receiptItemsEditor').insertAdjacentHTML('beforeend', receiptItemRowHtml('', '', 'Other'));
+  const otherId = categories.find((c) => c.name === 'Other')?.id ?? '';
+  document.getElementById('receiptItemsEditor').insertAdjacentHTML('beforeend', receiptItemRowHtml('', '', otherId));
 };
 
 document.addEventListener('click', (e) => {
@@ -1518,9 +1543,9 @@ document.getElementById('saveReceiptBtn').onclick = async () => {
     .map((row) => ({
       label: row.querySelector('.receipt-item-label').value.trim(),
       price: parseFloat(row.querySelector('.receipt-item-price').value),
-      category: row.querySelector('.receipt-item-category').value.trim(),
+      categoryId: row.querySelector('.receipt-item-category').value,
     }))
-    .filter((r) => r.label && !Number.isNaN(r.price) && r.category);
+    .filter((r) => r.label && !Number.isNaN(r.price) && r.categoryId);
 
   if (rows.length === 0) {
     status.textContent = 'Add at least one item with a price and category before saving.';
@@ -1566,17 +1591,15 @@ document.getElementById('saveReceiptBtn').onclick = async () => {
     let learnedAny = false;
     for (const r of rows) {
       const current = classifyItem(r.label);
-      if (current.group === r.category) continue;
-      const icon = iconForCategory(r.category);
+      if (current.categoryId === r.categoryId) continue;
       const existingRule = customCategoryRules.find((rule) => rule.keyword.toLowerCase() === r.label.toLowerCase());
       if (existingRule) {
-        await sb.from('item_category_rules').update({ category: r.category, icon }).eq('id', existingRule.id);
+        await sb.from('item_category_rules').update({ category_id: r.categoryId }).eq('id', existingRule.id);
       } else {
         await sb.from('item_category_rules').insert({
           household_id: profile.household_id,
           keyword: r.label,
-          category: r.category,
-          icon,
+          category_id: r.categoryId,
         });
       }
       learnedAny = true;
@@ -1690,18 +1713,76 @@ async function loadSettings() {
   await loadCategoryRules();
 }
 
-// Shared by the Settings rule form and the receipt review row (both use
-// <input list="categoryDatalist">): typing an existing category's name
-// reuses it, typing anything else creates a new one - no separate "add new
-// category" mode to find. Rebuilt whenever customCategoryRules reloads so a
-// category introduced from the receipt review screen shows up as a
-// suggestion in Settings too, and vice versa.
-function renderCategoryDatalist() {
-  document.getElementById('categoryDatalist').innerHTML = [...knownCategories(), 'Other']
-    .map((g) => `<option value="${escapeAttr(g)}"></option>`)
+// ---------------------------------------------------------------------------
+// Categories: the household's real, editable list (name + icon). Separate
+// from category *rules* below on purpose - "add a category" and "match a
+// keyword to a category" were one confusing combined form before this.
+// ---------------------------------------------------------------------------
+async function loadCategories() {
+  const { data } = await sb
+    .from('categories')
+    .select('*')
+    .eq('household_id', profile.household_id)
+    .order('created_at', { ascending: true });
+  categories = data ?? [];
+  renderCategories();
+  renderRuleCategorySelect();
+}
+
+function renderCategories() {
+  const list = document.getElementById('categoriesList');
+  if (categories.length === 0) {
+    list.innerHTML = '<p class="no-rules-note">No categories yet - add one below.</p>';
+    return;
+  }
+  list.innerHTML = categories
+    .map(
+      (c) => `
+        <div class="rule-row">
+          <span class="rule-icon">${c.icon}</span>
+          <span class="rule-keyword">${c.name}</span>
+          <button type="button" class="category-delete" data-id="${c.id}" aria-label="Delete category ${c.name}">✕</button>
+        </div>
+      `,
+    )
+    .join('');
+  list.querySelectorAll('.category-delete').forEach((btn) => {
+    btn.onclick = async (e) => {
+      await sb.from('categories').delete().eq('id', e.target.dataset.id);
+      await loadCategories();
+      await loadCategoryRules(); // any rules pointing at the deleted category are now orphaned - refresh their display
+    };
+  });
+}
+
+function renderRuleCategorySelect() {
+  document.getElementById('ruleCategory').innerHTML = categories
+    .map((c) => `<option value="${c.id}">${c.icon} ${escapeAttr(c.name)}</option>`)
     .join('');
 }
 
+document.getElementById('addCategoryForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const status = document.getElementById('categoryStatus');
+  const name = document.getElementById('categoryName').value.trim();
+  const icon = document.getElementById('categoryIcon').value.trim() || '🛒';
+  if (!name) { status.textContent = 'Enter a category name first.'; status.className = 'save-status error'; return; }
+
+  const { error } = await sb.from('categories').insert({ household_id: profile.household_id, name, icon });
+  if (error) {
+    status.textContent = error.message.includes('duplicate') ? 'You already have a category with that name.' : error.message;
+    status.className = 'save-status error';
+    return;
+  }
+  status.textContent = '';
+  document.getElementById('categoryName').value = '';
+  document.getElementById('categoryIcon').value = '';
+  await loadCategories();
+};
+
+// ---------------------------------------------------------------------------
+// Category rules: keyword -> pick one of the categories above. No free text.
+// ---------------------------------------------------------------------------
 async function loadCategoryRules() {
   const { data } = await sb
     .from('item_category_rules')
@@ -1715,7 +1796,6 @@ async function loadCategoryRules() {
 }
 
 function renderCategoryRules() {
-  renderCategoryDatalist();
   const list = document.getElementById('categoryRulesList');
   if (customCategoryRules.length === 0) {
     list.innerHTML = '<p class="no-rules-note">No custom rules yet - items you haven\'t taught it about show a shopping trolley icon under "Other".</p>';
@@ -1723,18 +1803,19 @@ function renderCategoryRules() {
   }
   // Grouped and collapsed by category rather than one long flat list -
   // receipt scanning can add a rule per line item, so this grows fast.
-  const byCategory = {};
-  customCategoryRules.forEach((r) => { (byCategory[r.category] ??= []).push(r); });
-  const categories = Object.keys(byCategory).sort((a, b) => byCategory[b].length - byCategory[a].length);
+  const byCategoryId = {};
+  customCategoryRules.forEach((r) => {
+    const cat = categories.find((c) => c.id === r.category_id) ?? { id: 'unknown', name: 'Unknown category', icon: '❓' };
+    (byCategoryId[cat.id] ??= { category: cat, rules: [] }).rules.push(r);
+  });
+  const groups = Object.values(byCategoryId).sort((a, b) => b.rules.length - a.rules.length);
 
-  list.innerHTML = categories
-    .map((category) => {
-      const rules = byCategory[category];
+  list.innerHTML = groups
+    .map(({ category, rules }) => {
       const rows = rules
         .map(
           (r) => `
             <div class="rule-row">
-              <span class="rule-icon">${r.icon}</span>
               <span class="rule-keyword">${r.keyword}</span>
               <button type="button" class="rule-delete" data-id="${r.id}" aria-label="Delete rule for ${r.keyword}">✕</button>
             </div>
@@ -1743,7 +1824,7 @@ function renderCategoryRules() {
         .join('');
       return `
         <details class="rule-group">
-          <summary>${category} <span class="rule-group-count">${rules.length}</span></summary>
+          <summary>${category.icon} ${category.name} <span class="rule-group-count">${rules.length}</span></summary>
           ${rows}
         </details>
       `;
@@ -1761,16 +1842,14 @@ document.getElementById('addRuleForm').onsubmit = async (e) => {
   e.preventDefault();
   const status = document.getElementById('ruleStatus');
   const keyword = document.getElementById('ruleKeyword').value.trim();
-  const category = document.getElementById('ruleCategory').value.trim();
-  const icon = document.getElementById('ruleIcon').value.trim() || '🛒';
+  const categoryId = document.getElementById('ruleCategory').value;
   if (!keyword) { status.textContent = 'Enter a word to match first.'; status.className = 'save-status error'; return; }
-  if (!category) { status.textContent = 'Enter a category.'; status.className = 'save-status error'; return; }
+  if (!categoryId) { status.textContent = 'Add a category above first, then pick one here.'; status.className = 'save-status error'; return; }
 
   const { error } = await sb.from('item_category_rules').insert({
     household_id: profile.household_id,
     keyword,
-    category,
-    icon,
+    category_id: categoryId,
   });
   if (error) {
     status.textContent = error.message;
@@ -1779,8 +1858,6 @@ document.getElementById('addRuleForm').onsubmit = async (e) => {
   }
   status.textContent = '';
   document.getElementById('ruleKeyword').value = '';
-  document.getElementById('ruleCategory').value = '';
-  document.getElementById('ruleIcon').value = '';
   await loadCategoryRules();
 };
 
@@ -1851,12 +1928,14 @@ document.getElementById('joinHouseholdBtn').onclick = async () => {
     const { data: p } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
     profile = p;
     await loadStores();
+    await loadCategories();
     await loadCategoryRules();
     localStorage.removeItem(LIST_STORAGE_KEY); // old list's id belongs to the previous household
     await loadLists();
     await loadItems();
     await loadSettings();
     await loadAnalytics();
+    await loadRecentReceipts();
   } finally {
     btn.disabled = false;
   }

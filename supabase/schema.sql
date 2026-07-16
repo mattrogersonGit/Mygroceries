@@ -94,16 +94,31 @@ create table list_items (
 create index list_items_household_idx on list_items (household_id);
 create index list_items_list_idx on list_items (list_id);
 
--- Household-defined overrides for the built-in keyword -> (aisle group, icon)
--- guesses in index.html's ITEM_GROUP_RULES (e.g. "margarine" isn't recognised
--- as dairy by the built-in rules, so a household can add one here instead of
--- waiting for a code change). Checked first, before the built-in JS rules.
+-- A household's real, editable list of aisle/spend categories - name + icon.
+-- Every household starts with a seeded copy of Pak'nSave's own category list
+-- (see seed_default_categories() below), fully add/deletable afterwards.
+create table categories (
+  id uuid primary key default gen_random_uuid(),
+  household_id uuid not null references households(id) on delete cascade,
+  name text not null,
+  icon text not null default '🛒',
+  created_at timestamptz not null default now(),
+  unique (household_id, name)
+);
+create index categories_household_idx on categories (household_id);
+
+-- Household-defined keyword -> category mappings, checked before the
+-- built-in keyword guesses in index.html's ITEM_GROUP_RULES (e.g. "margarine"
+-- isn't recognised as dairy by the built-in rules, so a household can add one
+-- here instead of waiting for a code change). category_id is nullable +
+-- on delete set null: deleting a category orphans any rules pointing at it
+-- rather than deleting the rules outright, which just reverts those items to
+-- auto-classification instead of silently losing the override entirely.
 create table item_category_rules (
   id uuid primary key default gen_random_uuid(),
   household_id uuid not null references households(id) on delete cascade,
   keyword text not null,   -- case-insensitive substring match against the item's label
-  category text not null,  -- must match one of index.html's ITEM_GROUP_ORDER entries
-  icon text not null,      -- a single emoji
+  category_id uuid references categories(id) on delete set null,
   created_at timestamptz not null default now()
 );
 create index item_category_rules_household_idx on item_category_rules (household_id);
@@ -150,6 +165,7 @@ alter table profiles enable row level security;
 alter table household_stores enable row level security;
 alter table shopping_lists enable row level security;
 alter table list_items enable row level security;
+alter table categories enable row level security;
 alter table item_category_rules enable row level security;
 alter table receipts enable row level security;
 alter table receipt_items enable row level security;
@@ -192,6 +208,10 @@ create policy "manage own household's lists" on shopping_lists
   with check (household_id = my_household_id());
 
 create policy "manage own household's list" on list_items
+  for all using (household_id = my_household_id())
+  with check (household_id = my_household_id());
+
+create policy "manage own household's categories" on categories
   for all using (household_id = my_household_id())
   with check (household_id = my_household_id());
 
@@ -265,6 +285,42 @@ $$;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function handle_new_user();
+
+-- ============================================================
+-- Seed every new household with a starting category list
+-- (Pak'nSave's own category list, minus "Featured" which is a merchandising
+-- tag, not something an item is ever actually filed under)
+-- ============================================================
+
+create or replace function seed_default_categories()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into categories (household_id, name, icon) values
+    (new.id, 'Fruit & Vegetables', '🍎'),
+    (new.id, 'Meat, Poultry & Seafood', '🥩'),
+    (new.id, 'Fridge, Deli & Eggs', '🥛'),
+    (new.id, 'Bakery', '🍞'),
+    (new.id, 'Frozen', '🧊'),
+    (new.id, 'Pantry', '🍚'),
+    (new.id, 'Hot & Cold Drinks', '☕'),
+    (new.id, 'Beer, Wine & Cider', '🍷'),
+    (new.id, 'Health & Body', '🧴'),
+    (new.id, 'Baby & Toddler', '🍼'),
+    (new.id, 'Pets', '🐾'),
+    (new.id, 'Household & Cleaning', '🧼'),
+    (new.id, 'Snacks, Treats & Easy Meals', '🍫'),
+    (new.id, 'Other', '🛒');
+  return new;
+end;
+$$;
+
+create trigger on_household_created_seed_categories
+  after insert on households
+  for each row execute function seed_default_categories();
 
 -- ============================================================
 -- Join an existing household by invite code
